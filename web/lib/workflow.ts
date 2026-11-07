@@ -192,8 +192,8 @@ export function completeStep(studentId: number, stepId: number, data: Record<str
 export function requestChanges(studentId: number, stepId: number, by: User, note: string) {
   const d = db();
   tx(() => {
-    d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = 2').run(studentId);
-    d.prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
+    // Course selection reopens, and new courses go back through every review (high school, units, prerequisites).
+    d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id IN (2, 4, 7, 8)').run(studentId);
     d.prepare('INSERT OR REPLACE INTO step_progress (student_id, step_id, status, completed_at, data) VALUES (?,?,?,?,?)').run(
       studentId, stepId, 'changes_requested', now(), JSON.stringify({ by_id: by.id, note }));
   });

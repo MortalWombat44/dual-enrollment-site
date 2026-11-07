@@ -117,10 +117,10 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
   { id: 1, name: 'Apply on CCCApply', short: 'CCCApply', description: 'Creates the Shasta College student record' },
   { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
   { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'E-signature or uploaded signed form' },
-  // Step 7 was added later, so its id is 7, but it sits 4th: this array's order is the workflow order.
+  { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
+  // Steps 7 and 8 were added later, so their ids are out of order: this array's order is the workflow order.
   { id: 7, name: 'Clear units', short: 'Clear units', description: 'Shasta College checks the courses and unit load' },
   { id: 8, name: 'Prerequisite review', short: 'Prerequisite review', description: 'A college counselor approves classes that have a prerequisite (only shown when one is requested)' },
-  { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
   { id: 5, name: 'Register for classes', short: 'Register', description: 'Opens on the term registration date' },
   { id: 6, name: 'Textbooks & Canvas access', short: 'Textbooks & Canvas', description: "Shown to students, doesn't block completion" },
 ];
@@ -284,11 +284,11 @@ function seed(d: DatabaseSync) {
       for (const c of s.courses) insReq.run(id, courseIds[c]);
     }
     if (s.days[2]) insProg.run(id, 3, 'complete', s.days[2], JSON.stringify({ method: 'esign', signer: `${s.f === 'Maya' ? 'Laura' : 'Parent of ' + s.f} ${s.l}` }));
-    // Maya, Ethan and Sofia already had their units cleared (now with the counselor);
-    // Lucas and Ava are waiting in the college admin's Clear units queue.
-    if (['Maya', 'Ethan', 'Sofia'].includes(s.f)) {
+    // Maya, Lucas and Ava are waiting on their high school counselor;
+    // Ethan and Sofia were approved by the high school and wait in the college admin's Clear units queue.
+    if (['Ethan', 'Sofia'].includes(s.f)) {
       const t = new Date(new Date(s.days[2]!).getTime() + 864e5).toISOString();
-      insProg.run(id, 7, 'complete', t, JSON.stringify({ admin_id: jordan }));
+      insProg.run(id, 4, 'complete', t, JSON.stringify({ counselor_id: alvarez, note: 'Good plan.' }));
     }
   }
   const laura = user('Laura', 'Rivera', 'laura.rivera@gmail.com', 'parent', enterprise);

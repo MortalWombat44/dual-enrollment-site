@@ -45,9 +45,9 @@ Demo accounts (password `shasta2027`):
 1. Apply on CCCApply (student)
 2. Course selection (student)
 3. Parent consent (parent, invited by the student)
-4. Clear units (college admin)
-5. Prerequisite review (college counselor). Only shown when a requested class has a prerequisite.
-6. High school approval (high school counselor)
+4. High school approval (high school counselor)
+5. Clear units (college admin)
+6. Prerequisite review (college counselor). Only shown when a requested class has a prerequisite.
 7. Register for classes (student, after the registration date)
 8. Textbooks & Canvas (student)
 
@@ -57,6 +57,7 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 
 - **College admin**: the Students page for every school. Can clear units, move any step forward (mark complete) or back (reopen it and every later step), request or remove classes for a student, and move a student to another school.
 - **College counselor**: a flag on any admin. Only these admins can approve or decline classes with a prerequisite. A declined class comes off the request; if nothing is left, the student goes back to Course selection with the note.
+- Whenever a reviewer sends classes back, Course selection reopens and the new classes go through High school approval, Clear units and Prerequisite review again.
 - **Super admin**: everything above, plus Users (create users and admins, set admin level and the college counselor flag), Schools (add schools, edit step rules) and Terms (registration date).
 
 ## Workflow rules

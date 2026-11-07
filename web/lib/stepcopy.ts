@@ -53,9 +53,9 @@ export function dashboardLine(p: StudentProgress): string {
   if (!n) return '';
   switch (n.status) {
     case 'in_review':
-      if (n.id === 7) return 'Your courses and parent consent are in. Shasta College is checking your units now.';
+      if (n.id === 7) return 'Your high school approved your plan. Shasta College is checking your units now.';
       if (n.id === 8) return 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.';
-      return 'Your units are cleared. Your high school counselor is reviewing your plan now.';
+      return 'Your courses and parent consent are in. Your high school counselor is reviewing your plan now.';
     case 'waiting_parent': return p.parents.length ? 'Your courses are in. Your parent or guardian needs to sign the consent form next.' : 'Your courses are in. Invite your parent or guardian to sign the consent form next.';
     case 'changes': return `${p.changeBy === 'college' ? 'Shasta College' : 'Your counselor'} asked for a change to your courses. Update them and resubmit.`;
     case 'scheduled': return `You're cleared to register. Registration opens ${fmt(p.term.registration_opens)}.`;
@@ -95,10 +95,10 @@ export function completionCopy(p: StudentProgress, s: StudentStep): { title: str
   switch (s.id) {
     case 1: return { title: 'Your application\nis in.', poster: 'Your Shasta College application is in.', body: `CCCApply confirmation ${String(s.data?.confirmation ?? '')}. Next, pick your courses.` };
     case 2: return { title: 'Your courses\nare picked.', poster: 'Your courses are picked.', body: `You requested ${list}. Your parent or guardian signs the consent form next.` };
-    case 3: return { title: 'Parent consent\nis signed.', poster: 'Parent consent is signed.', body: after(3)?.id === 7 ? "We've sent your packet to Shasta College to clear your units. You'll see it here when it's done." : after(3)?.id === 4 ? "We've sent your packet to your high school counselor. You'll see it here when it's approved." : `Your packet is complete. ${reg}` };
-    case 7: return { title: 'Your units\nare cleared.', poster: 'Shasta College cleared your units.', body: `Shasta College cleared ${list}. ${after(7)?.id === 8 ? 'A college counselor checks prerequisites next.' : after(7)?.id === 4 ? 'Your high school counselor reviews your plan next.' : reg}` };
-    case 8: return { title: 'Prerequisites\nare approved.', poster: 'Your prerequisites are approved.', body: `A college counselor approved ${list}. ${after(8)?.id === 4 ? 'Your high school counselor reviews your plan next.' : reg}` };
-    case 4: return { title: `You're approved,\n${p.student.first_name}.`, poster: 'Your high school approved your courses.', body: `${counselor} approved ${list}. ${reg}` };
+    case 3: return { title: 'Parent consent\nis signed.', poster: 'Parent consent is signed.', body: after(3)?.id === 4 ? "We've sent your packet to your high school counselor. You'll see it here when it's approved." : after(3)?.id === 7 ? "We've sent your packet to Shasta College to clear your units. You'll see it here when it's done." : `Your packet is complete. ${reg}` };
+    case 7: return { title: 'Your units\nare cleared.', poster: 'Shasta College cleared your units.', body: `Shasta College cleared ${list}. ${after(7)?.id === 8 ? 'A college counselor checks prerequisites next.' : reg}` };
+    case 8: return { title: 'Prerequisites\nare approved.', poster: 'Your prerequisites are approved.', body: `A college counselor approved ${list}. ${reg}` };
+    case 4: return { title: `You're approved,\n${p.student.first_name}.`, poster: 'Your high school approved your courses.', body: `${counselor} approved ${list}. ${after(4)?.id === 7 ? 'Shasta College clears your units next.' : reg}` };
     case 5: return { title: `You're registered,\n${p.student.first_name}.`, poster: "You're registered for classes.", body: `You're enrolled in ${list} for ${p.term.name}.` };
     default: return { title: "You're ready\nfor class.", poster: "You're ready for class.", body: 'Textbooks and Canvas are set. Watch Canvas for messages from your instructors.' };
   }

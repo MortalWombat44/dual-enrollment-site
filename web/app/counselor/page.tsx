@@ -39,7 +39,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
     const s = u.toString();
     return '/counselor' + (s ? '?' + s : '');
   };
-  const flash = sp.done === 'approved' ? `Approved ${sp.name}'s courses. They can register when registration opens.` : sp.done === 'changes' ? `Sent ${sp.name}'s plan back with your note.` : null;
+  const flash = sp.done === 'approved' ? `Approved ${sp.name}'s courses. Shasta College clears their units next.` : sp.done === 'changes' ? `Sent ${sp.name}'s plan back with your note.` : null;
 
   return (
     <div className="frame">
