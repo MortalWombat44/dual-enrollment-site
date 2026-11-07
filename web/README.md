@@ -48,14 +48,15 @@ Demo accounts (password `shasta2027`):
 
 ## Steps (in order)
 
-1. Apply on CCCApply (student)
-2. Course selection (student)
-3. Parent consent (parent, invited by the student)
-4. High school approval (high school counselor)
+1. Apply on CCCApply: Shasta College ID (student, once ever)
+2. Parent consent (parent, invited by the student). A one-time, general consent, not tied to specific classes. Course selection stays locked until it's signed.
+3. Course selection (student)
+4. High school approval (high school staff, signed digitally). Students and parents don't see staff names; they're told to check with their high school counselor.
 5. Clear units (college admin)
 6. Prerequisite review (college counselor). Only shown when a requested class has a prerequisite.
-7. Register for classes (student, after the registration date)
-8. Textbooks & Canvas (student)
+7. Register for classes: every student registers themselves in myShasta, then confirms here
+
+Textbooks & Canvas is switched off for now (commented out in `STEP_DEFS` in `lib/db.ts`; its page and wording are still in the code).
 
 Step ids in the database don't follow this order (Clear units is id 7, Prerequisite review id 8), so always use `STEP_DEFS` / `STEP_ORDER` in `lib/db.ts` for ordering.
 

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, STEP_ORDER } from '@/lib/db';
 import { addSchool } from '@/lib/admin-actions';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
 
@@ -13,8 +13,8 @@ export default async function SchoolsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const rows = db().prepare(`
     SELECT s.id, s.name, s.district, s.designation,
-      (SELECT COUNT(*) FROM school_steps ss WHERE ss.school_id = s.id AND ss.mode = 'required') AS required,
-      (SELECT COUNT(*) FROM steps) AS total,
+      (SELECT COUNT(*) FROM school_steps ss WHERE ss.school_id = s.id AND ss.mode = 'required' AND ss.step_id IN (${STEP_ORDER.join(',')})) AS required,
+      ${STEP_ORDER.length} AS total,
       (SELECT COUNT(*) FROM users u WHERE u.school_id = s.id AND u.role = 'student') AS students
     FROM schools s ORDER BY s.name`).all() as Row[];
   const ccap = rows.filter((r) => r.designation === 'CCAP').length;

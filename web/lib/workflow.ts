@@ -118,8 +118,10 @@ export function schoolStepRows(schoolId: number) {
     .prepare('SELECT s.id, s.name, s.description, ss.mode, ss.note FROM steps s LEFT JOIN school_steps ss ON ss.step_id = s.id AND ss.school_id = ?')
     .all(schoolId) as { id: number; name: string; description: string; mode: Mode | null; note: string | null }[];
   // Show in workflow order, using the current names from the code.
+  // Only steps that are switched on in the code (e.g. Textbooks & Canvas is off for now).
   return rows
-    .map((r) => { const def = STEP_DEFS.find((d) => d.id === r.id); return def ? { ...r, name: def.name, description: def.description } : r; })
+    .filter((r) => STEP_ORDER.includes(r.id))
+    .map((r) => { const def = STEP_DEFS.find((d) => d.id === r.id)!; return { ...r, name: def.name, description: def.description }; })
     .sort((a, b) => STEP_ORDER.indexOf(a.id) - STEP_ORDER.indexOf(b.id));
 }
 export function defaultModes(designation: 'CCAP' | 'NON_CCAP') {

@@ -23,7 +23,7 @@ export default async function CompletePage({ params }: { params: Promise<{ n: st
   const d = s.data ?? {};
   const by =
     s.id === 3 ? { k: 'Signed by', v: String(d.signer ?? '—'), sub: `Parent / guardian · ${fmt(s.completedAt)}` } :
-    s.id === 4 ? { k: 'Approved by', v: p.counselor ? displayName(p.counselor, true) : '—', sub: `${p.school.name} · ${fmt(s.completedAt)}` } :
+    s.id === 4 ? { k: 'Approved by', v: 'Your high school', sub: `${p.school.name} · ${fmt(s.completedAt)}` } :
     s.id === 7 ? { k: 'Cleared by', v: 'Shasta College', sub: fmt(s.completedAt) } :
     s.id === 8 ? { k: 'Approved by', v: 'College counselor', sub: `Shasta College · ${fmt(s.completedAt)}` } :
     { k: 'Completed', v: fmt(s.completedAt, 'mdy'), sub: fmt(s.completedAt, 'time') };

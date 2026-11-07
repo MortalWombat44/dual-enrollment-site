@@ -175,14 +175,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 type Mode = 'required' | 'optional' | 'off';
 export const STEP_DEFS: { id: number; name: string; short: string; description: string }[] = [
   { id: 1, name: 'Apply on CCCApply', short: 'CCCApply', description: 'Creates the Shasta College student record' },
-  { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
+  // Parent consent comes before course selection: students can't pick classes until a parent has signed.
   { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'E-signature or uploaded signed form' },
+  { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
   { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
   // Steps 7 and 8 were added later, so their ids are out of order: this array's order is the workflow order.
   { id: 7, name: 'Clear units', short: 'Clear units', description: 'Shasta College checks the courses and unit load' },
   { id: 8, name: 'Prerequisite review', short: 'Prerequisite review', description: 'A college counselor approves classes that have a prerequisite (only shown when one is requested)' },
-  { id: 5, name: 'Register for classes', short: 'Register', description: 'Opens on the term registration date' },
-  { id: 6, name: 'Textbooks & Canvas access', short: 'Textbooks & Canvas', description: "Shown to students, doesn't block completion" },
+  { id: 5, name: 'Register for classes', short: 'Register', description: 'Every student registers in myShasta once registration opens' },
+  // Turned off for now. To bring it back, uncomment this line (its page and wording are still in the code):
+  // { id: 6, name: 'Textbooks & Canvas access', short: 'Textbooks & Canvas', description: "Shown to students, doesn't block completion" },
 ];
 
 export const DEFAULT_MODES: Record<'CCAP' | 'NON_CCAP', Record<number, Mode>> = {
@@ -279,8 +281,7 @@ function seed(d: DatabaseSync) {
       if (name === 'Enterprise High School' && s.id === 4) mode = 'required';
       if (name === 'Shasta High School' && s.id === 4) mode = 'required';
       const note =
-        s.id === 4 && mode === 'off' ? 'Pre-approved under the CCAP agreement' :
-        s.id === 5 && des === 'CCAP' ? 'Done by Admissions & Records for CCAP cohorts' : null;
+        s.id === 4 && mode === 'off' ? 'Pre-approved under the CCAP agreement' : null;
       insMode.run(id, s.id, mode, note);
     }
   }

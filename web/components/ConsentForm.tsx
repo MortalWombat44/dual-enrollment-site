@@ -8,12 +8,11 @@ const MAX = 10 * 1024 * 1024;
 const OK_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 
 export function ConsentForm({
-  action, studentId, studentFirst, term, parentName, error,
+  action, studentId, studentFirst, parentName, error,
 }: {
   action: (fd: FormData) => Promise<void>;
   studentId: number;
   studentFirst: string;
-  term: string;
   parentName: string;
   error?: string;
 }) {
@@ -104,7 +103,7 @@ export function ConsentForm({
       <label style={{ display: 'flex', gap: 12, alignItems: 'flex-start', fontSize: 14, maxWidth: 640, cursor: 'pointer' }}>
         <input type="checkbox" name="agree" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }} />
         <span aria-hidden style={{ width: 20, height: 20, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, background: agree ? 'var(--color-accent)' : 'transparent', color: '#fff', border: agree ? 0 : '2px solid var(--color-text)' }}>{agree ? '✓' : ''}</span>
-        I'm {studentFirst}'s parent or legal guardian and I give permission for {studentFirst} to enroll in Shasta College courses for {term} and future terms. I understand this is a one-time consent that I can revoke at any time.
+        I'm {studentFirst}'s parent or legal guardian and I give permission for {studentFirst} to enroll in Shasta College courses through dual enrollment and concurrent enrollment, now and in future terms. I understand this is a one-time consent that I can revoke at any time.
       </label>
 
       <div style={{ display: 'flex', gap: 12, borderTop: '2px solid var(--color-text)', paddingTop: 20, flexWrap: 'wrap' }}>

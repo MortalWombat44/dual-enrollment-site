@@ -43,7 +43,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
             <div className="kicker accent700">{p.termLabel} · Dual Enrollment</div>
             <h1 className="h-sm" style={{ fontSize: 56, lineHeight: 1.02, margin: '14px 0 0', letterSpacing: '-0.03em' }}>{kid.first_name}'s progress<br />is private.</h1>
             <p style={{ fontSize: 17, maxWidth: 560, margin: '18px 0 0', textWrap: 'pretty' }}>
-              {kid.first_name} hasn't shared their dual enrollment records with you. If they turn on sharing in their account, you'll see their steps, courses and counselor review here.
+              {kid.first_name} hasn't shared their dual enrollment records with you. If they turn on sharing in their account, you'll see their steps, courses and reviews here.
             </p>
             {signedByMe && (
               <p style={{ fontSize: 15, margin: '18px 0 0' }}><a href={`/consent/${kid.id}`}>View the consent you signed</a></p>
@@ -58,7 +58,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
                 <div>
                   <div className="kicker" style={{ opacity: 0.85 }}>Waiting on you</div>
                   <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10, letterSpacing: '-0.02em' }}>Parent consent form</div>
-                  <p style={{ fontSize: 15, margin: '12px 0 0', color: 'var(--color-accent-100)' }}>{kid.first_name} needs your permission to take Shasta College courses. You'll see the courses before you sign.</p>
+                  <p style={{ fontSize: 15, margin: '12px 0 0', color: 'var(--color-accent-100)' }}>{kid.first_name} needs your permission to take Shasta College courses. They can pick classes once you sign.</p>
                 </div>
                 <Link href={`/parent/consent?student=${kid.id}`} className="btn btn-white">Review &amp; sign <span>→</span></Link>
               </>
@@ -84,7 +84,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
   const line = p.done
     ? `${kid.first_name} has finished every required step for ${p.termLabel}.`
     : needsYou
-      ? `${kid.first_name}'s courses are picked. Your consent is the next step.`
+      ? `${kid.first_name} needs your consent before they can pick Shasta College classes.`
       : `${kid.first_name} is cleared through ${cleared?.short.toLowerCase() ?? 'the first step'}.${p.next ? ` ${p.next.short} is next.` : ''}`;
 
   return (
@@ -144,7 +144,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
             <div style={{ padding: '22px 20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10, background: 'var(--color-surface)', minHeight: 180 }}>
               <div style={{ fontSize: 13, lineHeight: 1.5 }}>
                 Questions about a step? {contact ? <>Your DE contact is <strong>{contact.first_name} {contact.last_name}</strong>, Shasta College Outreach.</> : 'Contact Shasta College Outreach.'}
-                {p.counselor && <> {kid.first_name}'s counselor is {displayName(p.counselor, true)}.</>}
+ For high school approval, check with {kid.first_name}'s high school counselor.
               </div>
               {contact && <a href={`mailto:${contact.email}`} className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Message {contact.first_name}</a>}
             </div>

@@ -128,7 +128,7 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
     ];
   } else if (s.id === 4 || s.id === 7 || s.id === 8) {
     cells = [
-      s.id === 4 ? ['Approved by', p.counselor ? displayName(p.counselor, true) : '—', `${p.school.name} · ${fmt(s.completedAt)}`]
+      s.id === 4 ? ['Approved by', 'Your high school', `${p.school.name} · ${fmt(s.completedAt)}`]
         : [s.id === 7 ? 'Cleared by' : 'Approved by', s.id === 7 ? 'Shasta College' : 'College counselor', fmt(s.completedAt)],
       ['Note', d.note ? `“${String(d.note)}”` : '—', ''],
       ['Units approved', String(units), p.termLabel],
@@ -161,7 +161,7 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
 
 function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string }) {
   const tag = stepTag(s)!;
-  const counselor = p.counselor ? displayName(p.counselor, true) : 'your counselor';
+  const counselor = 'Your high school'; // no staff names for students
   const prevReq = [...p.steps].reverse().find((x) => x.num < s.num && x.mode === 'required' && x.status !== 'complete');
   const live = s.status !== 'locked' && s.status !== 'scheduled';
   const body =
@@ -170,7 +170,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
     s.status === 'in_review' ? (
       s.id === 7 ? 'Shasta College is checking your courses and unit load. Usually 1–2 days.' :
       s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
-      `${counselor} is reviewing your course plan. Usually 2–3 school days.`) :
+      'Your high school is reviewing your classes. Check with your high school counselor if you have questions.') :
     s.status === 'waiting_parent' ? (
       p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form from their own account.` :
       p.parents[0] ? `${displayName(p.parents[0])} hasn't accepted your invite yet. Send them the link below again if they need it.` :
@@ -220,7 +220,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
         )}
         {s.id === 5 && s.status === 'current' && (
           <form action={confirmRegistered} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <p style={{ margin: 0, fontSize: 15 }}>Register in myShasta for your approved sections: <strong>{p.courses.map((c) => c.code).join(', ')}</strong>.{p.school.designation === 'CCAP' ? ' For CCAP cohorts, Admissions & Records may register you; confirm here once you see the classes in myShasta.' : ''}</p>
+            <p style={{ margin: 0, fontSize: 15 }}>Register yourself in myShasta for your approved sections: <strong>{p.courses.map((c) => c.code).join(', ')}</strong>. Once you're registered, confirm it here.</p>
             <div className="field" style={{ maxWidth: 360 }}><label htmlFor="crns">Section numbers (CRNs), optional</label><input id="crns" name="crns" className="input" placeholder="e.g. 40211, 40388" /></div>
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>I'm registered <span>→</span></button></div>
           </form>

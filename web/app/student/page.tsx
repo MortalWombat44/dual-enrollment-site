@@ -64,7 +64,7 @@ export default async function StudentDashboard({ searchParams }: { searchParams:
                 ) : prev?.completedAt && (n.status === 'in_review' || n.status === 'waiting_parent') ? (
                   <Row label="Submitted" value={fmt(prev.completedAt)} />
                 ) : n.status === 'changes' ? (
-                  <Row label="Counselor" value={p.counselor ? displayName(p.counselor, true) : '—'} />
+                  <Row label="Sent back by" value={p.changeBy === 'college' ? 'Shasta College' : 'Your high school'} />
                 ) : (
                   <Row label="Term" value={p.termLabel} />
                 )}

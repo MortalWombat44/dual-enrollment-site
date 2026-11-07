@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
 import { canSeeStudent, isParentOf } from '@/lib/access';
 import { getFile } from '@/lib/files';
-import { currentTerm, fmt, getProgress } from '@/lib/workflow';
+import { fmt, getProgress } from '@/lib/workflow';
 import { PrintButton } from '@/components/PrintButton';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,6 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
   const step = p?.steps.find((s) => s.id === 3);
   const d = (step?.data ?? {}) as { method?: string; signer?: string; file_id?: number };
   const file = d.file_id ? getFile(d.file_id) : null;
-  const term = p?.term ?? currentTerm();
   const line = (label: string, value?: string) => (
     <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--color-divider)', fontSize: 14 }}>
       <span className="ink60">{label}</span><span style={{ minHeight: 20 }}>{value ?? ''}</span>
@@ -37,17 +36,16 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
         <PrintButton />
       </div>
       <div>
-        <div className="kicker accent700">{term.name}</div>
+        <div className="kicker accent700">Dual Enrollment</div>
         <h1 style={{ fontSize: 36, margin: '8px 0 0' }}>Parent / guardian consent</h1>
       </div>
       <div>
         {line('Student', p ? `${p.student.first_name} ${p.student.last_name}` : undefined)}
         {line('Shasta College ID', p?.student.student_number ?? undefined)}
         {line('High school', p?.school.name)}
-        {line('Courses', p ? p.courses.map((c) => `${c.code} ${c.title} (${c.units})`).join(', ') : undefined)}
       </div>
       <p style={{ fontSize: 14, margin: 0 }}>
-        I am the parent or legal guardian of the student named above. I give permission for the student to enroll in Shasta College courses, starting with those listed for {term.name}. This is a one-time consent that covers future terms until I revoke it.
+        I am the parent or legal guardian of the student named above. I give permission for the student to enroll in Shasta College courses through dual enrollment and concurrent enrollment. This is a one-time consent that covers this and future terms until I revoke it.
         I understand that tuition is waived for dual enrollment, that textbooks are provided for these sections, and that grades are recorded on a permanent Shasta College transcript.
       </p>
       <div>

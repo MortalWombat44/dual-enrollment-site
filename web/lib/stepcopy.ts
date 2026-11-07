@@ -2,7 +2,8 @@ import { displayName, fmt, pad, type StudentProgress, type StudentStep } from '.
 
 /** Short line under each step in the dashboard grids (2a / 1a). */
 export function stepSub(p: StudentProgress, s: StudentStep): string {
-  const counselor = p.counselor ? displayName(p.counselor, true) : 'Your counselor';
+  // Students and parents never see staff names for high school approval.
+  const counselor = 'Your high school';
   const parent = p.parents[0] ? displayName(p.parents[0]) : 'Parent / guardian';
   const codes = p.courses.map((c) => c.code).join(', ');
   switch (s.status) {
@@ -17,7 +18,7 @@ export function stepSub(p: StudentProgress, s: StudentStep): string {
     case 'waiting_parent':
       return p.parents.length ? parent : 'Invite your parent';
     case 'changes':
-      return p.changeBy === 'college' ? 'Shasta College asked for changes' : 'Your counselor asked for changes';
+      return p.changeBy === 'college' ? 'Shasta College asked for changes' : 'Your high school asked for changes';
     case 'scheduled':
       return `Opens ${fmt(p.term.registration_opens)}`;
     case 'current':
@@ -55,9 +56,9 @@ export function dashboardLine(p: StudentProgress): string {
     case 'in_review':
       if (n.id === 7) return 'Your high school approved your plan. Shasta College is checking your units now.';
       if (n.id === 8) return 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.';
-      return 'Your courses and parent consent are in. Your high school counselor is reviewing your plan now.';
-    case 'waiting_parent': return p.parents.length ? 'Your courses are in. Your parent or guardian needs to sign the consent form next.' : 'Your courses are in. Invite your parent or guardian to sign the consent form next.';
-    case 'changes': return `${p.changeBy === 'college' ? 'Shasta College' : 'Your counselor'} asked for a change to your courses. Update them and resubmit.`;
+      return `Your high school is reviewing your classes now. Check with your high school counselor if you have questions.`;
+    case 'waiting_parent': return p.parents.length ? 'Your parent or guardian needs to sign the consent form before you can pick courses.' : 'Invite your parent or guardian to sign the consent form. You can pick courses once they do.';
+    case 'changes': return `${p.changeBy === 'college' ? 'Shasta College' : 'Your high school'} asked for a change to your courses. Update them and resubmit.`;
     case 'scheduled': return `You're cleared to register. Registration opens ${fmt(p.term.registration_opens)}.`;
     default:
       return p.complete === 0 ? 'Start by applying to Shasta College on CCCApply. It takes about 20 minutes.' : `Next up: ${n.name.toLowerCase()}.`;
@@ -66,7 +67,8 @@ export function dashboardLine(p: StudentProgress): string {
 
 /** Body copy in the green “Up next” card. */
 export function upNextLine(p: StudentProgress, s: StudentStep): string {
-  const counselor = p.counselor ? displayName(p.counselor, true) : 'Your counselor';
+  // Students and parents never see staff names for high school approval.
+  const counselor = 'Your high school';
   const codes = p.courses.map((c) => c.code);
   const list = codes.length > 1 ? codes.slice(0, -1).join(', ') + ' and ' + codes.at(-1) : codes[0] ?? 'your courses';
   switch (s.id) {
@@ -79,7 +81,7 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
         : `${displayName(p.parents[0])} hasn't accepted your invite yet.`;
     case 7: return `Shasta College is checking that ${list} fit your unit limit. Usually 1–2 days.`;
     case 8: return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.prerequisite).map((c) => c.code).join(', ') || 'your classes'}.`;
-    case 4: return `${counselor} is reviewing ${list}. Usually 2–3 school days.`;
+    case 4: return `Your high school is reviewing ${list}. Check with your high school counselor if you have questions.`;
     case 5: return s.status === 'scheduled' ? `Registration opens ${fmt(p.term.registration_opens)} at ${fmt(p.term.registration_opens, 'time')}.` : 'Register for your approved sections in myShasta.';
     default: return 'Get your textbooks and log in to Canvas before the first day.';
   }
@@ -87,18 +89,19 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
 
 /** Heading + paragraph on the completion screens (1b / 2d / 1c). */
 export function completionCopy(p: StudentProgress, s: StudentStep): { title: string; poster: string; body: string } {
-  const counselor = p.counselor ? displayName(p.counselor, true) : 'Your counselor';
+  // Students and parents never see staff names for high school approval.
+  const counselor = 'Your high school';
   const codes = p.courses.map((c) => c.code);
   const list = codes.length > 1 ? codes.slice(0, -1).join(', ') + ' and ' + codes.at(-1) : codes[0] ?? 'your courses';
   const after = (id: number) => p.steps[p.steps.findIndex((x) => x.id === id) + 1];
   const reg = `Registration opens ${fmt(p.term.registration_opens)} at ${fmt(p.term.registration_opens, 'time')}.`;
   switch (s.id) {
-    case 1: return { title: 'Your application\nis in.', poster: 'Your Shasta College application is in.', body: p.student.student_number ? `Your Shasta College ID is ${p.student.student_number}. Next, pick your courses.` : "Add your Shasta College ID as soon as you get it. You'll be brought back here until you do. Next, pick your courses." };
-    case 2: return { title: 'Your courses\nare picked.', poster: 'Your courses are picked.', body: `You requested ${list}. Your parent or guardian signs the consent form next.` };
-    case 3: return { title: 'Parent consent\nis signed.', poster: 'Parent consent is signed.', body: 'It covers future terms too, so you only need it once. ' + (after(3)?.id === 4 ? "We've sent your packet to your high school counselor. You'll see it here when it's approved." : after(3)?.id === 7 ? "We've sent your packet to Shasta College to clear your units. You'll see it here when it's done." : `Your packet is complete. ${reg}`) };
+    case 1: return { title: 'Your application\nis in.', poster: 'Your Shasta College application is in.', body: p.student.student_number ? `Your Shasta College ID is ${p.student.student_number}. Next, your parent or guardian gives consent.` : "Add your Shasta College ID as soon as you get it. You'll be brought back here until you do. Next, your parent or guardian gives consent." };
+    case 2: return { title: 'Your courses\nare picked.', poster: 'Your courses are picked.', body: `You requested ${list}. ${after(2)?.id === 4 ? 'Your high school reviews them next.' : after(2)?.id === 7 ? 'Shasta College clears your units next.' : reg}` };
+    case 3: return { title: 'Parent consent\nis signed.', poster: 'Parent consent is signed.', body: 'It covers future terms too, so you only need it once. ' + (after(3)?.id === 2 ? 'Next, pick your courses.' : `Your packet is complete. ${reg}`) };
     case 7: return { title: 'Your units\nare cleared.', poster: 'Shasta College cleared your units.', body: `Shasta College cleared ${list}. ${after(7)?.id === 8 ? 'A college counselor checks prerequisites next.' : reg}` };
     case 8: return { title: 'Prerequisites\nare approved.', poster: 'Your prerequisites are approved.', body: `A college counselor approved ${list}. ${reg}` };
-    case 4: return { title: `You're approved,\n${p.student.first_name}.`, poster: 'Your high school approved your courses.', body: `${counselor} approved ${list}. ${after(4)?.id === 7 ? 'Shasta College clears your units next.' : reg}` };
+    case 4: return { title: `You're approved,\n${p.student.first_name}.`, poster: 'Your high school approved your courses.', body: `Your high school approved ${list}. ${after(4)?.id === 7 ? 'Shasta College clears your units next.' : reg}` };
     case 5: return { title: `You're registered,\n${p.student.first_name}.`, poster: "You're registered for classes.", body: `You're enrolled in ${list} for ${p.termLabel}.` };
     default: return { title: "You're ready\nfor class.", poster: "You're ready for class.", body: 'Textbooks and Canvas are set. Watch Canvas for messages from your instructors.' };
   }

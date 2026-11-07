@@ -8,7 +8,6 @@ type Step = { id: number; name: string; description: string };
 
 function stepNote(s: Step, mode: Mode, des: Des) {
   if (s.id === 4 && mode === 'off') return des === 'CCAP' ? 'Pre-approved under the CCAP agreement' : 'Turned off for this school';
-  if (s.id === 5 && des === 'CCAP') return 'Done by Admissions & Records for CCAP cohorts';
   return s.description;
 }
 
