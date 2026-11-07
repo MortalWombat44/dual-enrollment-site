@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireRole } from '@/lib/auth';
-import { canSeeStudent } from '@/lib/access';
+import { isParentOf } from '@/lib/access';
 import { OUTREACH_PHONE } from '@/lib/constants';
 import { getProgress, pad, studentsForParent } from '@/lib/workflow';
 import { submitConsent } from '@/lib/parent-actions';
@@ -22,7 +22,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const kids = studentsForParent(me.id);
   const studentId = Number(sp.student) || kids[0]?.id;
-  if (!studentId || !canSeeStudent(me, studentId)) redirect('/parent');
+  if (!studentId || !isParentOf(me, studentId)) redirect('/parent');
   const p = getProgress(studentId)!;
   const step = p.steps.find((s) => s.id === 3);
   if (!step || step.status !== 'waiting_parent') redirect('/parent');

@@ -18,9 +18,8 @@ Demo accounts (password `shasta2027`):
 | Role | Email |
 | --- | --- |
 | Student (step 4, in review) | maya.r@student.suhsd.net |
-| Student (not started) | jamie.l@student.andersonhigh.org |
-| Parent of Maya | laura.rivera@gmail.com |
-| Parent of Jamie | chris.lee@gmail.com |
+| Student (not started, no parent yet) | jamie.l@student.andersonhigh.org |
+| Parent of Maya (Maya shares her progress) | laura.rivera@gmail.com |
 | Counselor, Enterprise HS | ralvarez@suhsd.net |
 | Admin | dortiz@shastacollege.edu |
 
@@ -42,6 +41,8 @@ Demo accounts (password `shasta2027`):
 
 - Steps unlock in order. A step unlocks once every *required* step before it is complete. *Optional* steps never block, and *Off* steps are hidden and the list renumbers.
 - A student's step rules are copied from their school when they complete their first step, so later admin changes only affect students who haven't started.
+- Parent accounts are created only by a student: on step 03 the student enters their parent's name and email and gets an invite link to copy, text or email. The parent sets a password from that link. Admins can't create parent accounts.
+- Parents see only whether their consent is needed (plus the courses on the consent form and the consent they signed) unless the student turns on **Account → Let my parent / guardian accounts see my progress**.
 - Parent consent: the parent draws a signature with a finger, stylus or mouse (stored as a PNG), or uploads a signed PDF/JPG/PNG of up to 10 MB. File types are checked from the file contents, not the extension.
 - Counselor *Request changes* requires a note. It reopens the student's course selection and shows them the note.
 - Register for classes stays locked until the term's registration date (Spring 2027: Dec 2, 8:00 AM PT).

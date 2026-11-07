@@ -1,7 +1,7 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { requireRole } from './auth';
-import { canSeeStudent } from './access';
+import { isParentOf } from './access';
 import { MAX_UPLOAD_BYTES } from './constants';
 import { saveFile, sniff } from './files';
 import { completeStep, getProgress } from './workflow';
@@ -10,7 +10,7 @@ export async function submitConsent(formData: FormData) {
   const me = await requireRole('parent');
   const studentId = Number(formData.get('studentId'));
   const back = (err: string) => redirect(`/parent/consent?student=${studentId}&error=${err}`);
-  if (!canSeeStudent(me, studentId)) redirect('/parent');
+  if (!isParentOf(me, studentId)) redirect('/parent');
   const p = getProgress(studentId);
   const step = p?.steps.find((s) => s.id === 3);
   if (!step || step.status !== 'waiting_parent') redirect('/parent');

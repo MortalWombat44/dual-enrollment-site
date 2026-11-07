@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
   gpa REAL,
   student_number TEXT,
   counselor_id INTEGER REFERENCES users(id),
+  share_with_parents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS parent_links (
@@ -145,6 +146,7 @@ export function db(): Db {
     const conn = new DatabaseSync(path.join(DATA_DIR, 'de.sqlite'));
     conn.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     conn.exec(SCHEMA);
+    migrate(conn);
     const count = conn.prepare('SELECT COUNT(*) AS n FROM steps').get() as { n: number };
     if (count.n === 0) seed(conn);
     _db = conn;
@@ -258,7 +260,11 @@ function seed(d: DatabaseSync) {
   let mayaId = 0;
   for (const s of students) {
     const id = user(s.f, s.l, s.e, 'student', enterprise, { grade: s.grade, gpa: s.gpa, num: s.num, counselor: alvarez });
-    if (s.f === 'Maya') mayaId = id;
+    if (s.f === 'Maya') {
+      mayaId = id;
+      // Maya has turned on sharing, so her parent sees everything; Jamie (below) hasn't.
+      d.prepare('UPDATE users SET share_with_parents = 1 WHERE id = ?').run(id);
+    }
     insEnroll.run(id, s.days[0], modesFor(enterprise));
     insProg.run(id, 1, 'complete', s.days[0], JSON.stringify({ confirmation: 'CCC-' + s.num }));
     if (s.days[1]) {
@@ -270,14 +276,20 @@ function seed(d: DatabaseSync) {
   const laura = user('Laura', 'Rivera', 'laura.rivera@gmail.com', 'parent', enterprise);
   d.prepare('INSERT INTO parent_links (parent_id, student_id) VALUES (?,?)').run(laura, mayaId);
 
-  // A not-yet-started student whose parent can try the consent flow end to end.
+  // A not-yet-started student with no parent account yet: they invite one from step 03.
   const jamie = user('Jamie', 'Lee', 'jamie.l@student.andersonhigh.org', 'student', anderson, { grade: 11, gpa: 3.3, num: '0413002' });
   d.prepare('INSERT INTO enrollments (student_id, term_id, started_at, step_modes) VALUES (?,1,NULL,NULL)').run(jamie);
-  const chris = user('Chris', 'Lee', 'chris.lee@gmail.com', 'parent', anderson);
-  d.prepare('INSERT INTO parent_links (parent_id, student_id) VALUES (?,?)').run(chris, jamie);
   d.exec('COMMIT');
 }
 
 export function cryptoToken() {
   return crypto.randomBytes(24).toString('base64url');
+}
+
+/** Adds columns introduced after a database was first created. */
+function migrate(d: DatabaseSync) {
+  const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('share_with_parents')) {
+    d.exec('ALTER TABLE users ADD COLUMN share_with_parents INTEGER NOT NULL DEFAULT 0');
+  }
 }

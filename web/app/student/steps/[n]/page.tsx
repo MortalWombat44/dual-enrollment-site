@@ -7,6 +7,7 @@ import { submitCccapply, submitCourses, confirmRegistered, finishTextbooks } fro
 import { MAX_UNITS } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
 import { PacketTable } from '@/components/PacketTable';
+import { ParentInvite } from '@/components/ParentInvite';
 import { logout } from '@/lib/session-actions';
 
 export const dynamic = 'force-dynamic';
@@ -17,10 +18,10 @@ const ERRORS: Record<string, string> = {
   units: `That's more than ${MAX_UNITS} units. Remove a course and try again.`,
 };
 
-export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string }> }) {
+export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string }> }) {
   const me = await requireRole('student');
   const { n } = await params;
-  const { error } = await searchParams;
+  const { error, invited, invite_error } = await searchParams;
   const p = getProgress(me.id);
   const s = p?.steps.find((x) => x.id === Number(n));
   if (!p || !s) notFound();
@@ -30,7 +31,7 @@ export default async function StepPage({ params, searchParams }: { params: Promi
     <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: '100vh', maxWidth: 1280, margin: '0 auto', boxShadow: '0 1px 3px rgba(0,0,0,.08)' }}>
       <Sidebar p={p} current={s.id} />
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {s.status === 'complete' ? <CompleteView p={p} s={s} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} />}
+        {s.status === 'complete' ? <CompleteView p={p} s={s} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} />}
         <div className="pad-sm" style={{ marginTop: 'auto', borderTop: '2px solid var(--color-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 48px', gap: 12, flexWrap: 'wrap' }}>
           {s.id === 3 && s.status === 'complete' ? (
             <a href={`/consent/${p.student.id}`} className="btn btn-ghost" style={{ color: 'var(--color-accent-700)' }}>View signed consent</a>
@@ -148,7 +149,7 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
   );
 }
 
-function OpenView({ p, s, error }: { p: StudentProgress; s: StudentStep; error?: string }) {
+function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string }) {
   const tag = stepTag(s)!;
   const counselor = p.counselor ? displayName(p.counselor, true) : 'your counselor';
   const prevReq = [...p.steps].reverse().find((x) => x.num < s.num && x.mode === 'required' && x.status !== 'complete');
@@ -157,7 +158,10 @@ function OpenView({ p, s, error }: { p: StudentProgress; s: StudentStep; error?:
     s.status === 'locked' ? `Finish step ${pad(prevReq?.num ?? s.num - 1)}, ${prevReq?.short.toLowerCase() ?? 'the step before this one'}, first.` :
     s.status === 'scheduled' ? `Registration for ${p.term.name} opens ${fmt(p.term.registration_opens, 'wmd')} at ${fmt(p.term.registration_opens, 'time')}.` :
     s.status === 'in_review' ? `${counselor} is reviewing your course plan. Usually 2–3 school days.` :
-    s.status === 'waiting_parent' ? (p.parents[0] ? `${displayName(p.parents[0])} can sign online or upload a signed form from their own account.` : "Your parent or guardian doesn't have an account yet. Ask your Shasta College DE contact to invite them.") :
+    s.status === 'waiting_parent' ? (
+      p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form from their own account.` :
+      p.parents[0] ? `${displayName(p.parents[0])} hasn't accepted your invite yet. Send them the link below again if they need it.` :
+      'Invite your parent or guardian to sign. They get their own account, and it takes them about two minutes.') :
     s.status === 'changes' ? `${counselor} asked for changes to your course plan.` :
     s.description + '.';
   return (
@@ -188,6 +192,7 @@ function OpenView({ p, s, error }: { p: StudentProgress; s: StudentStep; error?:
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
           </form>
         )}
+        {s.id === 3 && s.status !== 'complete' && <ParentInvite studentId={p.student.id} studentFirst={p.student.first_name} invited={invited} error={inviteError} />}
         {(s.status === 'in_review' || s.status === 'waiting_parent') && p.courses.length > 0 && (
           <div>
             <div className="kicker-sm" style={{ paddingBottom: 8, borderBottom: '2px solid var(--color-text)' }}>Courses requested</div>

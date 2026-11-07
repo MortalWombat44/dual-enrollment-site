@@ -8,7 +8,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const me = await currentUser();
   if (!me) return new Response('Not signed in', { status: 401 });
   const f = getFile(Number((await params).id));
-  if (!f || !canSeeStudent(me, f.student_id)) return new Response('Not found', { status: 404 });
+  // Uploaders keep access to their own files (a parent's signature or signed form).
+  if (!f || !(canSeeStudent(me, f.student_id) || f.uploaded_by === me.id)) return new Response('Not found', { status: 404 });
   return new Response(new Uint8Array(readFile(f)), {
     headers: {
       'Content-Type': f.mime,

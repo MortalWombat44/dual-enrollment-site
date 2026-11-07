@@ -1,7 +1,7 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { requireRole } from './auth';
-import { db, tx } from './db';
+import { cryptoToken, db, tx } from './db';
 import { completeStep, getProgress, schoolCourses } from './workflow';
 
 import { MAX_UNITS } from './constants';
@@ -50,4 +50,36 @@ export async function finishTextbooks() {
   const { me } = await stepFor(6, ['current']);
   completeStep(me.id, 6, null);
   redirect('/student/steps/6/complete');
+}
+
+export async function setParentSharing(formData: FormData) {
+  const me = await requireRole('student');
+  const on = formData.get('share') === 'on';
+  db().prepare('UPDATE users SET share_with_parents = ? WHERE id = ?').run(on ? 1 : 0, me.id);
+  redirect(`/student/account?saved=${on ? 'on' : 'off'}`);
+}
+
+/** Student invites a parent / guardian. Reuses an existing parent account with that email (e.g. a sibling's parent). */
+export async function inviteParent(formData: FormData) {
+  const me = await requireRole('student');
+  const first = String(formData.get('first') || '').trim().slice(0, 60);
+  const last = String(formData.get('last') || '').trim().slice(0, 60);
+  const email = String(formData.get('email') || '').trim().toLowerCase().slice(0, 200);
+  const fail = (e: string) => redirect(`/student/steps/3?invite_error=${e}`);
+  if (!first || !last) fail('name');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('email');
+  if (email === me.email.toLowerCase()) fail('self');
+  const existing = db().prepare('SELECT id, role FROM users WHERE email = ?').get(email) as { id: number; role: string } | undefined;
+  if (existing && existing.role !== 'parent') fail('taken');
+  const parentId = tx(() => {
+    let id = existing?.id;
+    if (!id) {
+      id = Number(db()
+        .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token) VALUES (?,?,?,'parent',?,'invited',?)")
+        .run(first, last, email, me.school_id, cryptoToken()).lastInsertRowid);
+    }
+    db().prepare('INSERT OR IGNORE INTO parent_links (parent_id, student_id) VALUES (?,?)').run(id, me.id);
+    return id;
+  });
+  redirect(`/student/steps/3?invited=${parentId}`);
 }

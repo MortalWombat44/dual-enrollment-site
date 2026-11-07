@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { sharesWithParents } from '@/lib/access';
 import { displayName, fmt, getProgress, pad, studentsForParent } from '@/lib/workflow';
 import { upNextLine } from '@/lib/stepcopy';
 import { TopBar, SegBar, Flash } from '@/components/chrome';
@@ -23,6 +24,51 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
   }
   const kid = kids.find((k) => k.id === Number(sp.student ?? sp.signed)) ?? kids[0];
   const p = getProgress(kid.id)!;
+  if (!sharesWithParents(kid.id)) {
+    // Not shared: the parent only learns whether their consent is needed, nothing else.
+    const consentNeeded = p.steps.find((s) => s.id === 3)?.status === 'waiting_parent';
+    const signedByMe = p.steps.find((s) => s.id === 3)?.data?.parent_id === me.id;
+    return (
+      <div className="frame">
+        <TopBar
+          user={me}
+          nav={kids.length > 1 ? kids.map((k) => ({ href: `/parent?student=${k.id}`, label: k.first_name })) : []}
+          current={kids.length > 1 ? `/parent?student=${kid.id}` : undefined}
+          right={<><span className="hide-sm">Student: <strong>{kid.first_name} {kid.last_name}</strong></span><span className="tag tag-neutral">Parent / guardian</span></>}
+        />
+        <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : null} />
+        <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', borderBottom: '2px solid var(--color-text)' }}>
+          <div className="pad-sm noborder-sm" style={{ padding: 40, borderRight: '2px solid var(--color-divider)' }}>
+            <div className="kicker accent700">{p.term.name} · Dual Enrollment</div>
+            <h1 className="h-sm" style={{ fontSize: 56, lineHeight: 1.02, margin: '14px 0 0', letterSpacing: '-0.03em' }}>{kid.first_name}'s progress<br />is private.</h1>
+            <p style={{ fontSize: 17, maxWidth: 560, margin: '18px 0 0', textWrap: 'pretty' }}>
+              {kid.first_name} hasn't shared their dual enrollment records with you. If they turn on sharing in their account, you'll see their steps, courses and counselor review here.
+            </p>
+            {signedByMe && (
+              <p style={{ fontSize: 15, margin: '18px 0 0' }}><a href={`/consent/${kid.id}`}>View the consent you signed</a></p>
+            )}
+          </div>
+          <div className="pad-sm" style={{ padding: 40, background: consentNeeded ? 'var(--color-accent)' : 'var(--color-surface)', color: consentNeeded ? '#fff' : undefined, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 24 }}>
+            {consentNeeded ? (
+              <>
+                <div>
+                  <div className="kicker" style={{ opacity: 0.85 }}>Waiting on you</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10, letterSpacing: '-0.02em' }}>Parent consent form</div>
+                  <p style={{ fontSize: 15, margin: '12px 0 0', color: 'var(--color-accent-100)' }}>{kid.first_name} needs your permission to take Shasta College courses. You'll see the courses before you sign.</p>
+                </div>
+                <Link href={`/parent/consent?student=${kid.id}`} className="btn btn-white">Review &amp; sign <span>→</span></Link>
+              </>
+            ) : (
+              <div>
+                <div className="kicker">Nothing needed from you</div>
+                <p style={{ fontSize: 15, margin: '12px 0 0' }}>We'll show a consent request here when {kid.first_name} is ready for your signature.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
   const consent = p.steps.find((s) => s.id === 3);
   const needsYou = consent?.status === 'waiting_parent';
   const n = needsYou ? consent! : p.next;

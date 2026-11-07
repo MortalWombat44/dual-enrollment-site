@@ -57,7 +57,7 @@ export default async function StudentDashboard() {
                   <Row label="Term" value={p.term.name} />
                 )}
                 <Link href={`/student/steps/${n.id}`} className="btn btn-white">
-                  {n.status === 'current' || n.status === 'changes' ? 'Start step' : 'View status'} <span>→</span>
+                  {n.status === 'current' || n.status === 'changes' ? 'Start step' : n.status === 'waiting_parent' && !p.parents.length ? 'Invite parent' : 'View status'} <span>→</span>
                 </Link>
               </div>
             </>

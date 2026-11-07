@@ -4,7 +4,7 @@ import { requireRole } from './auth';
 import { cryptoToken, db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
 import { currentTerm } from './workflow';
 
-const ROLES = ['student', 'parent', 'counselor', 'admin'] as const;
+const ROLES = ['student', 'counselor', 'admin'] as const; // parents are invited by their student
 const MODES = ['required', 'optional', 'off'] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -15,7 +15,6 @@ export async function addUser(formData: FormData) {
   const email = String(formData.get('email') || '').trim().toLowerCase();
   const role = String(formData.get('role') || '') as (typeof ROLES)[number];
   const schoolId = Number(formData.get('school')) || null;
-  const studentId = Number(formData.get('student')) || null;
   const fail = (e: string) => redirect(`/admin/users?add=1&error=${e}`);
   if (!first || !last) fail('name');
   if (!EMAIL.test(email)) fail('email');
@@ -34,10 +33,6 @@ export async function addUser(formData: FormData) {
       .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor);
     const uid = Number(r.lastInsertRowid);
     if (role === 'student') db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, currentTerm().id);
-    if (role === 'parent' && studentId) {
-      const ok = db().prepare("SELECT 1 FROM users WHERE id = ? AND role = 'student' AND school_id = ?").get(studentId, schoolId);
-      if (ok) db().prepare('INSERT INTO parent_links (parent_id, student_id) VALUES (?,?)').run(uid, studentId);
-    }
     return uid;
   });
   redirect(`/admin/users?invited=${id}`);

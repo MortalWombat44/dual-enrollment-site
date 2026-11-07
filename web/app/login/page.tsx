@@ -7,8 +7,7 @@ export const dynamic = 'force-dynamic';
 const DEMO = [
   ['Student', 'maya.r@student.suhsd.net'],
   ['Student (not started)', 'jamie.l@student.andersonhigh.org'],
-  ['Parent', 'laura.rivera@gmail.com'],
-  ['Parent (new student)', 'chris.lee@gmail.com'],
+  ['Parent of Maya', 'laura.rivera@gmail.com'],
   ['Counselor', 'ralvarez@suhsd.net'],
   ['Admin', 'dortiz@shastacollege.edu'],
 ];

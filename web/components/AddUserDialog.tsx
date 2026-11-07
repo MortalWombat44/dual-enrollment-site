@@ -3,18 +3,16 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 type School = { id: number; name: string; designation: string };
-type Student = { id: number; name: string; school_id: number };
 
-export function AddUserDialog({ action, schools, students, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; students: Student[]; error?: string }) {
+export function AddUserDialog({ action, schools, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; error?: string }) {
   const [role, setRole] = useState('counselor');
   const [school, setSchool] = useState<number>(schools[0]?.id ?? 0);
-  const kids = students.filter((s) => s.school_id === school);
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
       <form action={action} className="modal">
         <div className="modal-head">
           <h2 id="add-user-title">Add user</h2>
-          <p>You'll get an invite link to send them so they can set a password.</p>
+          <p>You'll get an invite link to send them so they can set a password. Parents are invited by their student.</p>
         </div>
         <div className="modal-body">
           {error && <div className="flash flash-err" style={{ padding: '10px 14px' }}>{error}</div>}
@@ -26,7 +24,7 @@ export function AddUserDialog({ action, schools, students, error }: { action: (f
           <div className="field">
             <label>Role</label>
             <div className="seg seg-ink" style={{ display: 'flex' }} role="radiogroup" aria-label="Role">
-              {['student', 'parent', 'counselor', 'admin'].map((r) => (
+              {['student', 'counselor', 'admin'].map((r) => (
                 <label key={r} className="seg-opt" style={{ flex: 1 }}>
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} />
                   {r[0].toUpperCase() + r.slice(1)}
@@ -43,15 +41,6 @@ export function AddUserDialog({ action, schools, students, error }: { action: (f
             </div>
           ) : (
             <div className="field"><label>School</label><div className="input" style={{ display: 'flex', alignItems: 'center' }}>Shasta College</div></div>
-          )}
-          {role === 'parent' && (
-            <div className="field">
-              <label htmlFor="student">Parent of</label>
-              <select id="student" name="student" className="input" defaultValue="">
-                <option value="">Link a student later</option>
-                {kids.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-              </select>
-            </div>
           )}
         </div>
         <div className="modal-foot">

@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
-import { canSeeStudent } from '@/lib/access';
+import { canSeeStudent, isParentOf } from '@/lib/access';
 import { getFile } from '@/lib/files';
 import { currentTerm, fmt, getProgress } from '@/lib/workflow';
 import { PrintButton } from '@/components/PrintButton';
@@ -15,9 +15,11 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
   if (!me) redirect('/login');
   let p = null;
   if (!blank) {
-    if (!canSeeStudent(me, Number(studentId))) notFound();
     p = getProgress(Number(studentId));
     if (!p) notFound();
+    // A parent can always see the consent they signed, even if the student hasn't shared their records.
+    const signedBy = p.steps.find((s) => s.id === 3)?.data?.parent_id;
+    if (!canSeeStudent(me, Number(studentId)) && !(isParentOf(me, Number(studentId)) && signedBy === me.id)) notFound();
   }
   const step = p?.steps.find((s) => s.id === 3);
   const d = (step?.data ?? {}) as { method?: string; signer?: string; file_id?: number };

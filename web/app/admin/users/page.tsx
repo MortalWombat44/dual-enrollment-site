@@ -12,7 +12,7 @@ const ROLE_TABS = [
   ['', 'All'], ['student', 'Students'], ['parent', 'Parents'], ['counselor', 'Counselors'], ['admin', 'Admins'],
 ] as const;
 const ERRORS: Record<string, string> = {
-  name: 'Enter a first and last name.', email: 'Enter a valid email.', role: 'Pick a role.',
+  name: 'Enter a first and last name.', email: 'Enter a valid email.', role: 'Pick a role. Parents are invited by their student from the consent step.',
   school: 'Pick a school.', exists: 'Someone already has that email.',
 };
 
@@ -39,9 +39,6 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const tabHref = (r: string) => '/admin/users' + (r || q ? '?' + new URLSearchParams({ ...(r ? { role: r } : {}), ...(q ? { q } : {}) }) : '');
 
   const schools = db().prepare('SELECT id, name, designation FROM schools ORDER BY name').all() as { id: number; name: string; designation: string }[];
-  const students = sp.add
-    ? (db().prepare("SELECT id, first_name || ' ' || last_name AS name, school_id FROM users WHERE role = 'student' ORDER BY first_name").all() as { id: number; name: string; school_id: number }[])
-    : [];
 
   return (
     <AdminShell me={me} current="users">
@@ -87,7 +84,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           </tbody>
         </table>
       </div>
-      {sp.add && <AddUserDialog action={addUser} schools={schools} students={students} error={sp.error ? ERRORS[sp.error] : undefined} />}
+      {sp.add && <AddUserDialog action={addUser} schools={schools} error={sp.error ? ERRORS[sp.error] : undefined} />}
     </AdminShell>
   );
 }

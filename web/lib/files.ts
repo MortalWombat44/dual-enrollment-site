@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, UPLOAD_DIR } from './db';
 
-export type StoredFile = { id: number; student_id: number; kind: string; filename: string; mime: string; size: number; stored_name: string; created_at: string };
+export type StoredFile = { id: number; student_id: number; uploaded_by: number; kind: string; filename: string; mime: string; size: number; stored_name: string; created_at: string };
 
 const EXT: Record<string, string> = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png' };
 

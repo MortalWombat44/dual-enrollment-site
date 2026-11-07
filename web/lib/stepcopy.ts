@@ -14,7 +14,7 @@ export function stepSub(p: StudentProgress, s: StudentStep): string {
     case 'in_review':
       return counselor;
     case 'waiting_parent':
-      return parent;
+      return p.parents.length ? parent : 'Invite your parent';
     case 'changes':
       return 'Your counselor asked for changes';
     case 'scheduled':
@@ -52,7 +52,7 @@ export function dashboardLine(p: StudentProgress): string {
   if (!n) return '';
   switch (n.status) {
     case 'in_review': return 'Your courses and parent consent are in. Your counselor is reviewing your plan now.';
-    case 'waiting_parent': return 'Your courses are in. Your parent or guardian needs to sign the consent form next.';
+    case 'waiting_parent': return p.parents.length ? 'Your courses are in. Your parent or guardian needs to sign the consent form next.' : 'Your courses are in. Invite your parent or guardian to sign the consent form next.';
     case 'changes': return 'Your counselor asked for a change to your courses. Update them and resubmit.';
     case 'scheduled': return `You're cleared to register. Registration opens ${fmt(p.term.registration_opens)}.`;
     default:
@@ -68,7 +68,11 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
   switch (s.id) {
     case 1: return 'Apply to Shasta College on CCCApply, then enter your confirmation number here.';
     case 2: return s.status === 'changes' ? `${counselor} asked for changes to your course plan.` : "Pick the Shasta College sections offered for your school.";
-    case 3: return p.parents[0] ? `${displayName(p.parents[0])} can sign online or upload a signed form.` : 'Your parent or guardian signs online or uploads a signed form.';
+    case 3:
+      if (!p.parents.length) return 'Invite your parent or guardian. They make an account and sign online or upload a signed form.';
+      return p.parents.some((x) => x.status === 'active')
+        ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form.`
+        : `${displayName(p.parents[0])} hasn't accepted your invite yet.`;
     case 4: return `${counselor} is reviewing ${list}. Usually 2–3 school days.`;
     case 5: return s.status === 'scheduled' ? `Registration opens ${fmt(p.term.registration_opens)} at ${fmt(p.term.registration_opens, 'time')}.` : 'Register for your approved sections in myShasta.';
     default: return 'Get your textbooks and log in to Canvas before the first day.';
