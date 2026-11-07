@@ -7,9 +7,10 @@ type Course = {
 };
 type Term = { id: number; name: string; opens: string; limit: number };
 
+// Dual Enrollment shows period + teacher; Concurrent courses are just code, title and units.
 const when = (c: Course) => c.kind === 'de'
   ? [c.period ? `Period ${c.period}` : null, c.teacher].filter(Boolean).join(' · ') || 'At your high school'
-  : c.schedule || 'Schedule TBA';
+  : '';
 
 /**
  * Pick classes, in two groups: Dual Enrollment (taught at the student's high school, with period + teacher)
@@ -45,7 +46,7 @@ export function CoursePicker({ courses, initial, terms, ccap, schoolName }: {
         />
         <label htmlFor={`c${c.id}`} style={{ cursor: 'pointer' }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{c.code} · {c.title}</div>
-          <div className="ink60" style={{ fontSize: 13 }}>{c.units} units · {when(c)}{c.prerequisite ? ` · Prerequisite: ${c.prerequisite} (a college counselor reviews this)` : ''}</div>
+          <div className="ink60" style={{ fontSize: 13 }}>{c.units} units{when(c) ? ` · ${when(c)}` : ''}{c.prerequisite ? ` · Prerequisite: ${c.prerequisite} (a college counselor reviews this)` : ''}</div>
         </label>
         {on ? (
           <select name={`term_${c.id}`} className="input" aria-label={`Term for ${c.code} (${c.kind === 'de' ? 'Dual' : 'Concurrent'})`} value={sel.get(c.id)} onChange={(e) => setTerm(c.id, Number(e.target.value))} style={{ width: 150, marginRight: 8 }}>

@@ -255,12 +255,12 @@ function seed(d: DatabaseSync) {
   const anderson = schoolIds['Anderson High School'];
 
   const courses: [string, string, number, string][] = [
-    ['ENGL 1A', 'College Composition', 3, 'Tu/Th 3:30 PM'],
-    ['COMM 1', 'Public Speaking', 3, 'Online'],
-    ['MATH 13', 'Introduction to Statistics', 4, 'M/W 3:30 PM'],
-    ['HIST 17', 'United States History', 3, 'Online'],
-    ['PSY 1', 'General Psychology', 3, 'Online'],
-    ['AJ 1', 'Introduction to Administration of Justice', 3, 'Tu/Th 4:00 PM'],
+    ['ENGL 1A', 'College Composition', 3, ''],
+    ['COMM 1', 'Public Speaking', 3, ''],
+    ['MATH 13', 'Introduction to Statistics', 4, ''],
+    ['HIST 17', 'United States History', 3, ''],
+    ['PSY 1', 'General Psychology', 3, ''],
+    ['AJ 1', 'Introduction to Administration of Justice', 3, ''],
   ];
   const insCourse = d.prepare('INSERT INTO courses (code, title, units, schedule) VALUES (?,?,?,?)');
   const courseIds: Record<string, number> = {};

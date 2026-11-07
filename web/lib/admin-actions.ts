@@ -166,7 +166,6 @@ function courseFields(formData: FormData) {
     code: str('code', 20).toUpperCase(),
     title: str('title'),
     units: Number.isFinite(units) && units > 0 && units <= 10 ? units : NaN,
-    schedule: str('schedule'),
     period: str('period', 20) || null,
     teacher: str('teacher', 80) || null,
     prerequisite: str('prerequisite', 200) || null,
@@ -186,7 +185,7 @@ export async function addCourse(formData: FormData) {
   if (!f.code || !f.title || Number.isNaN(f.units)) redirect(courseReturn(formData, 'course_error=1'));
   if (schoolId && !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) redirect('/admin/schools');
   db().prepare('INSERT INTO courses (code, title, units, schedule, prerequisite, kind, school_id, period, teacher) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(f.code, f.title, f.units, kind === 'ce' ? f.schedule : '', f.prerequisite, kind, schoolId, kind === 'de' ? f.period : null, kind === 'de' ? f.teacher : null);
+    .run(f.code, f.title, f.units, '', f.prerequisite, kind, schoolId, kind === 'de' ? f.period : null, kind === 'de' ? f.teacher : null);
   redirect(courseReturn(formData, 'course_saved=1'));
 }
 
@@ -200,7 +199,7 @@ export async function saveCourse(formData: FormData) {
   if (c!.kind === 'de') {
     db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, period = ?, teacher = ?, prerequisite = ? WHERE id = ?').run(f.code, f.title, f.units, f.period, f.teacher, f.prerequisite, id);
   } else {
-    db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, schedule = ?, prerequisite = ? WHERE id = ?').run(f.code, f.title, f.units, f.schedule, f.prerequisite, id);
+    db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, prerequisite = ? WHERE id = ?').run(f.code, f.title, f.units, f.prerequisite, id);
   }
   redirect(courseReturn(formData, 'course_saved=1'));
 }

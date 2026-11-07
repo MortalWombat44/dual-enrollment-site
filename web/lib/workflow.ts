@@ -329,9 +329,9 @@ export function openSchoolChange(studentId: number) {
     { id: number; note: string | null; created_at: string; to_name: string; to_school_id: number } | undefined) ?? null;
 }
 
-/** "Period 2 · Mr. Hall" for Dual Enrollment, the schedule for Concurrent. */
-export function courseWhen(c: Pick<Course, 'kind' | 'period' | 'teacher' | 'schedule'>): string {
+/** "Period 2 · Mr. Hall" for Dual Enrollment. Concurrent courses are just code, title and units, so nothing. */
+export function courseWhen(c: Pick<Course, 'kind' | 'period' | 'teacher'>): string {
   if (c.kind === 'de') return [c.period ? `Period ${c.period}` : null, c.teacher].filter(Boolean).join(' · ') || 'At your high school';
-  return c.schedule || 'Schedule TBA';
+  return '';
 }
 export const KIND_LABEL = { de: 'Dual Enrollment', ce: 'Concurrent Enrollment' } as const;

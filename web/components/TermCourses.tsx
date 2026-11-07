@@ -34,7 +34,7 @@ export function TermCourses({ courses, terms, designation, showUnits = true, com
                   <strong>{c.code}</strong> · {c.title}
                   <span className="tag tag-neutral" style={{ marginLeft: 6, fontSize: 10 }} title={c.kind === 'de' ? 'Dual Enrollment: taught at the high school' : 'Concurrent Enrollment: taught at Shasta College'}>{c.kind === 'de' ? 'DE' : 'CE'}</span>
                 </span>
-                <span className="ink60">{c.units} units · {courseWhen(c)}</span>
+                <span className="ink60">{c.units} units{courseWhen(c) ? ` · ${courseWhen(c)}` : ''}</span>
               </div>
             ))}
             {showUnits && units > limit && (
