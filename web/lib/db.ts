@@ -85,7 +85,14 @@ CREATE TABLE IF NOT EXISTS courses (
   title TEXT NOT NULL,
   units INTEGER NOT NULL,
   schedule TEXT NOT NULL,
-  prerequisite TEXT
+  prerequisite TEXT,
+  -- 'ce' = Concurrent Enrollment, taught at Shasta College (one list for everyone).
+  -- 'de' = Dual Enrollment, taught at a high school (school_id), with a period and teacher.
+  kind TEXT NOT NULL DEFAULT 'ce' CHECK (kind IN ('ce','de')),
+  school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+  period TEXT,
+  teacher TEXT,
+  active INTEGER NOT NULL DEFAULT 1 -- removed courses stay on existing requests
 );
 CREATE TABLE IF NOT EXISTS school_courses (
   school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
@@ -261,8 +268,18 @@ function seed(d: DatabaseSync) {
   // Placeholder prerequisites so the Prerequisite review step has something to review.
   d.prepare('UPDATE courses SET prerequisite = ? WHERE code = ?').run('Intermediate algebra (or math placement)', 'MATH 13');
   d.prepare('UPDATE courses SET prerequisite = ? WHERE code = ?').run('Eligibility for ENGL 1A', 'AJ 1');
-  const insSC = d.prepare('INSERT INTO school_courses (school_id, course_id) VALUES (?,?)');
-  for (const sid of Object.values(schoolIds)) for (const cid of Object.values(courseIds)) insSC.run(sid, cid);
+  // Dual Enrollment sections taught at each high school (placeholders).
+  const insDE = d.prepare("INSERT INTO courses (code, title, units, schedule, kind, school_id, period, teacher, prerequisite) VALUES (?,?,?,'',  'de',?,?,?,?)");
+  const de: [string, string, string, number, string, string, string | null][] = [
+    ['Enterprise High School', 'ENGL 1A', 'College Composition', 3, '2', 'Mr. Hall', null],
+    ['Enterprise High School', 'HIST 17', 'United States History', 3, '5', 'Ms. Brennan', null],
+    ['Anderson High School', 'ENGL 1A', 'College Composition', 3, '3', 'Ms. Grant', null],
+    ['Foothill High School', 'PSY 1', 'General Psychology', 3, '1', 'Mr. Lane', null],
+    ['Shasta High School', 'COMM 1', 'Public Speaking', 3, '4', 'Ms. Reyes', null],
+    ['University Preparatory', 'MATH 13', 'Introduction to Statistics', 4, '6', 'Mr. Cho', 'Intermediate algebra (or math placement)'],
+    ['Fall River High School', 'AJ 1', 'Introduction to Administration of Justice', 3, '2', 'Mrs. Pike', 'Eligibility for ENGL 1A'],
+  ];
+  for (const [school, code, title, units, period, teacher, prereq] of de) insDE.run(code, title, units, schoolIds[school], period, teacher, prereq);
 
   const pw = hashPassword('shasta2027');
   const insUser = d.prepare(`INSERT INTO users (first_name, last_name, email, role, school_id, status, title, password_hash, invite_token, grade, gpa, student_number, counselor_id)
@@ -408,6 +425,14 @@ function migrate(d: DatabaseSync) {
   if (!reqCols.includes('term_id')) d.exec('ALTER TABLE course_requests ADD COLUMN term_id INTEGER REFERENCES terms(id)');
   const courseCols = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
   if (!courseCols.includes('prerequisite')) d.exec('ALTER TABLE courses ADD COLUMN prerequisite TEXT');
+  // Courses split into Concurrent (college) and Dual (per high school). Existing courses become Concurrent.
+  if (!courseCols.includes('kind')) {
+    d.exec("ALTER TABLE courses ADD COLUMN kind TEXT NOT NULL DEFAULT 'ce' CHECK (kind IN ('ce','de'))");
+    d.exec('ALTER TABLE courses ADD COLUMN school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE');
+    d.exec('ALTER TABLE courses ADD COLUMN period TEXT');
+    d.exec('ALTER TABLE courses ADD COLUMN teacher TEXT');
+    d.exec('ALTER TABLE courses ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+  }
   // Steps 7 (Clear units) and 8 (Prerequisite review) arrived after launch: add them, on for every school.
   if (d.prepare('SELECT 1 FROM steps WHERE id = 1').get()) {
     for (const id of [7, 8]) {

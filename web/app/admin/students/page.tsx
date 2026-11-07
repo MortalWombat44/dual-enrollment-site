@@ -292,7 +292,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
             <Hidden p={p} keep={keep} />
             <select name="courseId" className="input" required defaultValue="">
               <option value="" disabled>Request a class for this student…</option>
-              {offered.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.title} ({c.units})</option>)}
+              {offered.map((c) => <option key={c.id} value={c.id}>{c.kind === 'de' ? 'DE' : 'CE'} · {c.code} · {c.title} ({c.units})</option>)}
             </select>
             <select name="termId" className="input" defaultValue={p.term.id} aria-label="Term" style={{ width: 140 }}>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current === 1 ? '' : ' (closed)'}</option>)}

@@ -39,6 +39,7 @@ Demo accounts (password `shasta2027`):
 | 3a Users + Add user (super admin) | `/admin/users` |
 | 3b Schools + Add school | `/admin/schools` |
 | 3c School designation + step rules | `/admin/schools/[id]` |
+| Concurrent Enrollment course list; links to each school's Dual Enrollment list (super admin) | `/admin/courses` |
 | Terms: several at once, registration dates, registration allowed on/off (super admin) | `/admin/terms` |
 | Admin reports (Clear units wait times and counts) | `/admin/reports` |
 | Student sign-up (picks their high school) | `/signup` |
@@ -73,6 +74,7 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 - **High School Staff:** the high school role (shown as High School Staff) has a record-keeping type: Counselor, Admin, Teacher or Other. All types have the same access.
 - **Parent consent is one-time:** once signed it covers future terms. Reopening earlier steps keeps it; only reopening the Parent consent step itself removes it (e.g. if the parent revokes). Parents see a note with the revoke email, which is still a placeholder: set `CONSENT_REVOKE_EMAIL` in `lib/constants.ts`.
 - **Disabling accounts:** super admins can disable or re-enable any user from Users (not their own). A disabled user is signed out everywhere and can't sign in or use an invite link.
+- **Course lists:** two kinds. **Dual Enrollment** (taught at the high school; code, title, units, period, teacher, prerequisite) is edited per school at the bottom of `/admin/schools/[id]`. **Concurrent Enrollment** (taught at Shasta College; code, title, units, days/times, prerequisite) is edited at `/admin/courses`. Students see their own school's Dual Enrollment sections plus every Concurrent course, in two labelled groups. Removing a course hides it from new requests; existing requests keep it. Seeded courses and teachers are placeholders.
 - **Seeded named accounts** (`ensureAccounts` in `lib/db.ts`) are created on every fresh database, only if missing.
 
 ## Workflow rules

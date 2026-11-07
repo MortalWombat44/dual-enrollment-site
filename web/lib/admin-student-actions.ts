@@ -94,7 +94,7 @@ export async function adminReopenStep(formData: FormData) {
 export async function adminAddCourse(formData: FormData) {
   const { studentId, p } = await load(formData);
   const courseId = Number(formData.get('courseId'));
-  const offered = db().prepare('SELECT 1 FROM school_courses WHERE school_id = ? AND course_id = ?').get(p.school.id, courseId);
+  const offered = db().prepare("SELECT 1 FROM courses WHERE id = ? AND active = 1 AND (kind = 'ce' OR (kind = 'de' AND school_id = ?))").get(courseId, p.school.id);
   if (!offered) redirect(back(formData));
   const termId = Number(formData.get('termId'));
   if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));

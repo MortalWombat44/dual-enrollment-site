@@ -198,6 +198,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
               initial={p.courses.map((c) => ({ id: c.id, term_id: c.term_id }))}
               terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy'), limit: unitLimit(p.school.designation, t.summer === 1) }))}
               ccap={p.school.designation === 'CCAP'}
+              schoolName={p.school.name}
             />
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
           </form>

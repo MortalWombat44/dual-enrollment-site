@@ -21,7 +21,11 @@ export type School = {
   agreement_expires: string | null;
 };
 export type Term = { id: number; name: string; registration_opens: string; is_current?: number; summer?: number };
-export type Course = { id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null };
+export type Course = {
+  id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null;
+  /** 'ce' Concurrent Enrollment (at Shasta College) or 'de' Dual Enrollment (at the high school, with period + teacher). */
+  kind: 'ce' | 'de'; school_id: number | null; period: string | null; teacher: string | null; active: number;
+};
 /** A requested class, with the term the student asked to take it in. */
 export type RequestedCourse = Course & { term_id: number | null; term_name: string | null };
 
@@ -250,7 +254,8 @@ export function studentsForParent(parentId: number): User[] {
 
 export function schoolCourses(schoolId: number): Course[] {
   return db()
-    .prepare('SELECT c.* FROM school_courses sc JOIN courses c ON c.id = sc.course_id WHERE sc.school_id = ? ORDER BY c.code')
+    // What a student at this school can request: their high school's Dual Enrollment sections + every Concurrent course.
+    .prepare("SELECT * FROM courses WHERE active = 1 AND ((kind = 'de' AND school_id = ?) OR kind = 'ce') ORDER BY kind DESC, code")
     .all(schoolId) as Course[];
 }
 
@@ -323,3 +328,10 @@ export function openSchoolChange(studentId: number) {
     JOIN schools s ON s.id = r.to_school_id WHERE r.student_id = ? AND r.status = 'open'`).get(studentId) as
     { id: number; note: string | null; created_at: string; to_name: string; to_school_id: number } | undefined) ?? null;
 }
+
+/** "Period 2 · Mr. Hall" for Dual Enrollment, the schedule for Concurrent. */
+export function courseWhen(c: Pick<Course, 'kind' | 'period' | 'teacher' | 'schedule'>): string {
+  if (c.kind === 'de') return [c.period ? `Period ${c.period}` : null, c.teacher].filter(Boolean).join(' · ') || 'At your high school';
+  return c.schedule || 'Schedule TBA';
+}
+export const KIND_LABEL = { de: 'Dual Enrollment', ce: 'Concurrent Enrollment' } as const;

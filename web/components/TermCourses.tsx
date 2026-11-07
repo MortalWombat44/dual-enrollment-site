@@ -1,4 +1,4 @@
-import { fmt, type RequestedCourse, type Term } from '@/lib/workflow';
+import { courseWhen, fmt, type RequestedCourse, type Term } from '@/lib/workflow';
 import { unitLimit } from '@/lib/constants';
 
 /** Is registration allowed for this term (super admins switch it on/off on the Terms page)? */
@@ -30,7 +30,11 @@ export function TermCourses({ courses, terms, designation, showUnits = true, com
             </div>
             {list.map((c) => (
               <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: compact ? '6px 0' : '10px 0', borderBottom: '1px solid var(--color-divider)', fontSize: 14 }}>
-                <span><strong>{c.code}</strong> · {c.title}</span><span className="ink60">{c.units} units · {c.schedule}</span>
+                <span>
+                  <strong>{c.code}</strong> · {c.title}
+                  <span className="tag tag-neutral" style={{ marginLeft: 6, fontSize: 10 }} title={c.kind === 'de' ? 'Dual Enrollment: taught at the high school' : 'Concurrent Enrollment: taught at Shasta College'}>{c.kind === 'de' ? 'DE' : 'CE'}</span>
+                </span>
+                <span className="ink60">{c.units} units · {courseWhen(c)}</span>
               </div>
             ))}
             {showUnits && units > limit && (

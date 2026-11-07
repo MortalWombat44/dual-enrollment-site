@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { User } from '@/lib/auth';
 import { logout } from '@/lib/session-actions';
 
-export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'users' | 'schools' | 'terms' | 'reports'; children: React.ReactNode }) {
+export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'users' | 'schools' | 'courses' | 'terms' | 'reports'; children: React.ReactNode }) {
   const isSuper = me.admin_level === 'super';
   const link = (key: typeof current, href: string, label: string) => (
     <Link href={href} aria-current={current === key ? 'page' : undefined}>{label}</Link>
@@ -15,6 +15,7 @@ export function AdminShell({ me, current, children }: { me: User; current: 'stud
           {link('students', '/admin/students', 'Students')}
           {isSuper && link('users', '/admin/users', 'Users')}
           {isSuper && link('schools', '/admin/schools', 'Schools')}
+          {isSuper && link('courses', '/admin/courses', 'Courses')}
           {isSuper && link('terms', '/admin/terms', 'Terms')}
           {link('reports', '/admin/reports', 'Reports')}
         </nav>

@@ -7,10 +7,11 @@ import { getSchool, schoolModes, schoolStepRows } from '@/lib/workflow';
 import { AdminShell } from '@/components/AdminShell';
 import { SchoolEditor } from '@/components/SchoolEditor';
 import { Flash } from '@/components/chrome';
+import { CourseEditor } from '@/components/CourseEditor';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SchoolDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; created?: string; error?: string }> }) {
+export default async function SchoolDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; created?: string; error?: string; course_saved?: string; course_removed?: string; course_error?: string }> }) {
   const me = await requireAdmin('super');
   const { id } = await params;
   const sp = await searchParams;
@@ -42,6 +43,15 @@ export default async function SchoolDetail({ params, searchParams }: { params: P
           </div>
         }
       />
+      <div id="courses" className="pad-sm" style={{ padding: '8px 40px 48px', display: 'flex', flexDirection: 'column', gap: 12, borderTop: '2px solid var(--color-text)' }}>
+        <div style={{ paddingTop: 24 }}>
+          <div className="kicker">Dual Enrollment courses at {school.name}</div>
+          <div style={{ fontSize: 14, marginTop: 4 }}>Taught at the high school. Concurrent Enrollment courses (taught at Shasta College) are edited under <a href="/admin/courses">Courses</a>.</div>
+        </div>
+        <Flash msg={sp.course_saved ? 'Course saved.' : sp.course_removed ? 'Course removed from new requests.' : null} />
+        <Flash error msg={sp.course_error ? 'A course needs a code, a title and units.' : null} />
+        <CourseEditor schoolId={school.id} />
+      </div>
     </AdminShell>
   );
 }
