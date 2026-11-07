@@ -23,3 +23,8 @@ export function canSeeStudent(u: User, studentId: number): boolean {
   }
   return false;
 }
+
+/** The schools an admin is primarily responsible for (set by a super admin). */
+export function primarySchoolIds(adminId: number): number[] {
+  return (db().prepare('SELECT school_id FROM admin_schools WHERE admin_id = ?').all(adminId) as { school_id: number }[]).map((r) => r.school_id);
+}

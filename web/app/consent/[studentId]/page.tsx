@@ -47,7 +47,7 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
         {line('Courses', p ? p.courses.map((c) => `${c.code} ${c.title} (${c.units})`).join(', ') : undefined)}
       </div>
       <p style={{ fontSize: 14, margin: 0 }}>
-        I am the parent or legal guardian of the student named above. I give permission for the student to enroll in the Shasta College courses listed for {term.name}.
+        I am the parent or legal guardian of the student named above. I give permission for the student to enroll in Shasta College courses, starting with those listed for {term.name}. This is a one-time consent that covers future terms until I revoke it.
         I understand that tuition is waived for dual enrollment, that textbooks are provided for these sections, and that grades are recorded on a permanent Shasta College transcript.
       </p>
       <div>

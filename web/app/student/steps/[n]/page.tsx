@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireRole } from '@/lib/auth';
-import { displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
+import { activeTerms, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
+import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
 import { submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
 import { MAX_UNITS } from '@/lib/constants';
@@ -15,7 +16,8 @@ export const dynamic = 'force-dynamic';
 const ERRORS: Record<string, string> = {
   confirmation: 'Enter the confirmation number from your CCCApply email (letters, numbers and dashes).',
   none: 'Pick at least one course.',
-  units: `That's more than ${MAX_UNITS} units. Remove a course and try again.`,
+  units: `That's more than ${MAX_UNITS} units in one term. Remove a class or move it to another term.`,
+  term: 'Pick an open term for every class.',
 };
 
 export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string }> }) {
@@ -122,19 +124,19 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
     cells = [
       ['Signed by', String(d.signer ?? '—'), 'Parent / guardian'],
       ['Signed on', fmt(s.completedAt, 'mdy'), `${fmt(s.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded form' : d.method === 'office' ? 'marked complete by Shasta College' : 'e-signature'}`],
-      ['Units requested', String(units || '—'), p.term.name],
+      ['Units requested', String(units || '—'), p.termLabel],
     ];
   } else if (s.id === 4 || s.id === 7 || s.id === 8) {
     cells = [
       s.id === 4 ? ['Approved by', p.counselor ? displayName(p.counselor, true) : '—', `${p.school.name} · ${fmt(s.completedAt)}`]
         : [s.id === 7 ? 'Cleared by' : 'Approved by', s.id === 7 ? 'Shasta College' : 'College counselor', fmt(s.completedAt)],
       ['Note', d.note ? `“${String(d.note)}”` : '—', ''],
-      ['Units approved', String(units), p.term.name],
+      ['Units approved', String(units), p.termLabel],
     ];
   } else {
     cells = [
       ['Completed on', fmt(s.completedAt, 'mdy'), fmt(s.completedAt, 'time')],
-      [s.id === 1 ? 'Confirmation' : s.id === 2 ? 'Courses' : 'Term', s.id === 1 ? String(d.confirmation ?? '') : s.id === 2 ? p.courses.map((c) => c.code).join(', ') : p.term.name, s.id === 2 ? `${units} units` : ''],
+      [s.id === 1 ? 'Confirmation' : s.id === 2 ? 'Courses' : 'Term', s.id === 1 ? String(d.confirmation ?? '') : s.id === 2 ? p.courses.map((c) => c.code).join(', ') : p.termLabel, s.id === 2 ? `${units} units` : ''],
       ['School', p.school.name, p.school.designation === 'CCAP' ? 'CCAP partner' : 'Special admit'],
     ];
   }
@@ -177,7 +179,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
           <form action={submitCccapply} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ol style={{ margin: 0, paddingLeft: 20, fontSize: 15, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <li>Go to <a href="https://www.cccapply.org" target="_blank" rel="noreferrer">CCCApply</a> and pick Shasta College.</li>
-              <li>Choose <strong>{p.term.name}</strong> and “Dual enrollment / special admit” as your enrollment status.</li>
+              <li>Choose <strong>{p.termLabel}</strong> and “Dual enrollment / special admit” as your enrollment status.</li>
               <li>Copy the confirmation number from the email CCCApply sends you.</li>
             </ol>
             <div className="field" style={{ maxWidth: 360 }}><label htmlFor="conf">CCCApply confirmation number</label><input id="conf" name="confirmation" className="input" required placeholder="e.g. 18234567" /></div>
@@ -192,19 +194,20 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
                 <div style={{ fontSize: 15, marginTop: 4 }}>“{p.changeNote}”</div>
               </div>
             )}
-            <CoursePicker courses={schoolCourses(p.school.id)} initial={p.courses.map((c) => c.id)} max={MAX_UNITS} />
+            <CoursePicker
+              courses={schoolCourses(p.school.id)}
+              initial={p.courses.map((c) => ({ id: c.id, term_id: c.term_id }))}
+              terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy') }))}
+              max={MAX_UNITS}
+            />
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
           </form>
         )}
         {s.id === 3 && s.status !== 'complete' && <ParentInvite studentId={p.student.id} studentFirst={p.student.first_name} invited={invited} error={inviteError} />}
-        {(s.status === 'in_review' || s.status === 'waiting_parent') && p.courses.length > 0 && (
+        {(s.status === 'in_review' || s.status === 'waiting_parent' || s.status === 'locked' || s.status === 'scheduled' || (s.id === 5 && s.status === 'current')) && p.courses.length > 0 && (
           <div>
-            <div className="kicker-sm" style={{ paddingBottom: 8, borderBottom: '2px solid var(--color-text)' }}>Courses requested</div>
-            {p.courses.map((c) => (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '2px solid var(--color-divider)', fontSize: 14 }}>
-                <span><strong>{c.code}</strong> · {c.title}</span><span>{c.units} units · {c.schedule}</span>
-              </div>
-            ))}
+            <div className="kicker-sm" style={{ paddingBottom: 8 }}>Your classes by term</div>
+            <TermCourses courses={p.courses} terms={p.requestTerms} />
           </div>
         )}
         {s.id === 5 && s.status === 'current' && (

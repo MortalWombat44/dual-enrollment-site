@@ -7,6 +7,11 @@ import { currentTerm, fromPacificInput } from './workflow';
 const ROLES = ['student', 'counselor', 'admin'] as const; // parents are invited by their student
 const MODES = ['required', 'optional', 'off'] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const STAFF_TYPES = ['counselor', 'admin', 'teacher', 'other'];
+function staffTypeOf(formData: FormData) {
+  const t = String(formData.get('staff_type') || '');
+  return STAFF_TYPES.includes(t) ? t : 'counselor';
+}
 
 export async function addUser(formData: FormData) {
   await requireAdmin('super');
@@ -17,6 +22,7 @@ export async function addUser(formData: FormData) {
   const schoolId = Number(formData.get('school')) || null;
   const level = formData.get('admin_level') === 'super' ? 'super' : 'college';
   const collegeCounselor = role === 'admin' && formData.get('college_counselor') === 'on' ? 1 : 0;
+  const staffType = role === 'counselor' ? staffTypeOf(formData) : null;
   const fail = (e: string) => redirect(`/admin/users?add=1&error=${e}`);
   if (!first || !last) fail('name');
   if (!EMAIL.test(email)) fail('email');
@@ -31,10 +37,14 @@ export async function addUser(formData: FormData) {
       ? (db().prepare("SELECT id FROM users WHERE role = 'counselor' AND school_id = ? ORDER BY status = 'active' DESC, id LIMIT 1").get(schoolId) as { id: number } | undefined)?.id ?? null
       : null;
     const r = db()
-      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor) VALUES (?,?,?,?,?,'invited',?,?,?,?)")
-      .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor, role === 'admin' ? level : null, collegeCounselor);
+      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor, staff_type) VALUES (?,?,?,?,?,'invited',?,?,?,?,?)")
+      .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor, role === 'admin' ? level : null, collegeCounselor, staffType);
     const uid = Number(r.lastInsertRowid);
-    if (role === 'student') db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, currentTerm().id);
+    if (role === 'student') {
+      const termId = Number(formData.get('term'));
+      const term = termId && db().prepare('SELECT id FROM terms WHERE id = ?').get(termId) ? termId : currentTerm().id;
+      db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, term);
+    }
     return uid;
   });
   redirect(`/admin/users?invited=${id}`);
@@ -87,9 +97,22 @@ export async function saveTerm(formData: FormData) {
   const id = Number(formData.get('id'));
   const name = String(formData.get('name') || '').trim().slice(0, 60);
   const iso = fromPacificInput(String(formData.get('opens') || ''));
-  if (!name || !iso) redirect('/admin/terms?error=1');
-  db().prepare('UPDATE terms SET name = ?, registration_opens = ? WHERE id = ?').run(name, iso, id);
-  redirect('/admin/terms?saved=1');
+  const active = formData.get('active') === 'on' ? 1 : 0;
+  if (!name || !iso) redirect(`/admin/terms?error=fields&term=${id}`);
+  // Keep at least one active term so new students always have somewhere to go.
+  if (!active && !db().prepare('SELECT 1 FROM terms WHERE is_current = 1 AND id != ?').get(id)) redirect(`/admin/terms?error=last&term=${id}`);
+  db().prepare('UPDATE terms SET name = ?, registration_opens = ?, is_current = ? WHERE id = ?').run(name, iso, active, id);
+  redirect(`/admin/terms?saved=${id}`);
+}
+
+export async function addTerm(formData: FormData) {
+  await requireAdmin('super');
+  const name = String(formData.get('name') || '').trim().slice(0, 60);
+  const iso = fromPacificInput(String(formData.get('opens') || ''));
+  if (!name || !iso) redirect('/admin/terms?error=fields');
+  if (db().prepare('SELECT 1 FROM terms WHERE name = ?').get(name)) redirect('/admin/terms?error=exists');
+  const id = Number(db().prepare('INSERT INTO terms (name, registration_opens, is_current) VALUES (?,?,1)').run(name, iso).lastInsertRowid);
+  redirect(`/admin/terms?saved=${id}`);
 }
 
 /** Super admin: change an admin's level or college-counselor flag. */
@@ -101,6 +124,20 @@ export async function updateAdmin(formData: FormData) {
   const level = formData.get('admin_level') === 'super' ? 'super' : 'college';
   // Don't let a super admin lock everyone out by demoting themselves.
   if (id === me.id && level !== 'super') redirect('/admin/users?role=admin&error=self');
-  db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ? WHERE id = ?').run(level, formData.get('college_counselor') === 'on' ? 1 : 0, id);
+  const primary = formData.getAll('primary').map(Number).filter((n) => n > 0);
+  tx(() => {
+    db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ? WHERE id = ?').run(level, formData.get('college_counselor') === 'on' ? 1 : 0, id);
+    db().prepare('DELETE FROM admin_schools WHERE admin_id = ?').run(id);
+    const ins = db().prepare('INSERT INTO admin_schools (admin_id, school_id) SELECT ?, id FROM schools WHERE id = ?');
+    for (const sid of primary) ins.run(id, sid);
+  });
   redirect('/admin/users?role=admin&updated=' + id);
+}
+
+/** Super admin: record what kind of high school staff someone is (counselor, admin, teacher or other). */
+export async function updateStaffType(formData: FormData) {
+  await requireAdmin('super');
+  const id = Number(formData.get('id'));
+  db().prepare("UPDATE users SET staff_type = ? WHERE id = ? AND role = 'counselor'").run(staffTypeOf(formData), id);
+  redirect('/admin/users?role=counselor&updated=' + id);
 }

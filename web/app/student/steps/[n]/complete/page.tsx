@@ -32,7 +32,7 @@ export default async function CompletePage({ params }: { params: Promise<{ n: st
     s.id === 2 ? p.courses.map((c) => `${c.code} · ${c.units} units`).join(' · ') :
     s.id === 1 ? `Confirmation ${String(d.confirmation ?? '')}` :
     s.id === 3 ? (d.method === 'upload' ? 'Signed form uploaded.' : d.method === 'office' ? 'Consent on file with Shasta College.' : 'Signed online.') :
-    `${p.term.name} · ${p.school.name}`;
+    `${p.termLabel} · ${p.school.name}`;
 
   return (
     <>

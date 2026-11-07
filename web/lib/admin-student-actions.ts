@@ -2,12 +2,12 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
 import { db, tx } from './db';
-import { completeStep, getProgress, reopenFrom, requestChanges, schoolModes, STUDENT_STEP_IDS } from './workflow';
+import { completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
 function back(formData: FormData, extra: Record<string, string> = {}) {
   const u = new URLSearchParams();
-  for (const k of ['tab', 'school', 'q']) {
+  for (const k of ['tab', 'school', 'term', 'q']) {
     const v = String(formData.get(k) || '');
     if (v) u.set(k, v);
   }
@@ -29,7 +29,8 @@ async function load(formData: FormData) {
 export async function clearUnits(formData: FormData) {
   const { me, studentId, p, note } = await load(formData);
   if (p.steps.find((s) => s.id === 7)?.status !== 'in_review') redirect(back(formData));
-  completeStep(studentId, 7, { admin_id: me.id, note, units: p.courses.reduce((n, c) => n + c.units, 0) }, true);
+  // school_id records which school the student was at, for the Reports page.
+  completeStep(studentId, 7, { admin_id: me.id, school_id: p.school.id, note, units: p.courses.reduce((n, c) => n + c.units, 0) }, true);
   redirect(back(formData, { done: 'cleared' }));
 }
 
@@ -73,7 +74,7 @@ export async function adminCompleteStep(formData: FormData) {
   const stepId = Number(formData.get('stepId'));
   const s = p.steps.find((x) => x.id === stepId);
   if (!s || s.status === 'complete') redirect(back(formData));
-  const data: Record<string, unknown> = { admin_id: me.id, override: true };
+  const data: Record<string, unknown> = { admin_id: me.id, school_id: p.school.id, override: true };
   if (stepId === 3) Object.assign(data, { method: 'office', signer: 'On file with Shasta College' });
   if (stepId === 1) data.confirmation = 'Verified by Shasta College';
   db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
@@ -95,7 +96,9 @@ export async function adminAddCourse(formData: FormData) {
   const courseId = Number(formData.get('courseId'));
   const offered = db().prepare('SELECT 1 FROM school_courses WHERE school_id = ? AND course_id = ?').get(p.school.id, courseId);
   if (!offered) redirect(back(formData));
-  db().prepare('INSERT OR IGNORE INTO course_requests (student_id, course_id) VALUES (?,?)').run(studentId, courseId);
+  const termId = Number(formData.get('termId'));
+  if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
+  db().prepare('INSERT OR IGNORE INTO course_requests (student_id, course_id, term_id) VALUES (?,?,?)').run(studentId, courseId, termId);
   redirect(back(formData, { done: 'course_added' }));
 }
 
@@ -110,12 +113,40 @@ export async function reassignSchool(formData: FormData) {
   const { studentId, p } = await load(formData);
   const schoolId = Number(formData.get('schoolId'));
   if (!schoolId || schoolId === p.school.id || !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) redirect(back(formData));
-  tx(() => {
-    const counselor = db()
-      .prepare("SELECT id FROM users WHERE role = 'counselor' AND school_id = ? ORDER BY status = 'active' DESC, id LIMIT 1")
-      .get(schoolId) as { id: number } | undefined;
-    db().prepare('UPDATE users SET school_id = ?, counselor_id = ? WHERE id = ?').run(schoolId, counselor?.id ?? null, studentId);
-    db().prepare('UPDATE enrollments SET step_modes = ? WHERE student_id = ? AND step_modes IS NOT NULL').run(JSON.stringify(schoolModes(schoolId)), studentId);
-  });
+  moveStudentSchool(studentId, schoolId);
   redirect(back(formData, { done: 'moved_school' }));
+}
+
+/** Answer a student's request to change their high school. */
+export async function approveSchoolChange(formData: FormData) {
+  return decideSchoolChange(formData, true);
+}
+export async function declineSchoolChange(formData: FormData) {
+  return decideSchoolChange(formData, false);
+}
+async function decideSchoolChange(formData: FormData, approve: boolean) {
+  const { me, studentId } = await load(formData);
+  const req = db().prepare("SELECT id, to_school_id FROM school_change_requests WHERE student_id = ? AND status = 'open'").get(studentId) as { id: number; to_school_id: number } | undefined;
+  if (!req) redirect(back(formData));
+  if (approve) moveStudentSchool(studentId, req.to_school_id);
+  db().prepare('UPDATE school_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req.id);
+  redirect(back(formData, { done: approve ? 'school_change_approved' : 'school_change_declined' }));
+}
+
+/** Fix a student's Shasta College ID (e.g. when the same ID shows up on two accounts). */
+export async function setStudentNumber(formData: FormData) {
+  const { studentId } = await load(formData);
+  const num = String(formData.get('student_number') || '').trim().slice(0, 20) || null;
+  if (num && !/^[A-Za-z0-9-]+$/.test(num)) redirect(back(formData, { error: 'id' }));
+  db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, studentId);
+  redirect(back(formData, { done: 'id_saved' }));
+}
+
+/** Change which term a requested class is in. */
+export async function adminSetCourseTerm(formData: FormData) {
+  const { studentId } = await load(formData);
+  const termId = Number(formData.get('termId'));
+  if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
+  db().prepare('UPDATE course_requests SET term_id = ? WHERE student_id = ? AND course_id = ?').run(termId, studentId, Number(formData.get('courseId')));
+  redirect(back(formData, { done: 'course_term' }));
 }

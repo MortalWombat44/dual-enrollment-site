@@ -49,6 +49,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Sign in <span>→</span></button>
             </div>
           </form>
+          <div style={{ fontSize: 15 }}>New student? <a href="/signup">Create your account</a></div>
           {(process.env.NODE_ENV !== 'production' || process.env.SHOW_DEMO_ACCOUNTS === '1') && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <div className="kicker-sm" style={{ paddingBottom: 8, borderBottom: '2px solid var(--color-text)' }}>Demo accounts · password shasta2027</div>

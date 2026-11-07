@@ -26,9 +26,14 @@ export default async function StudentDashboard() {
           <span><strong>Step {pad(s.num)} complete.</strong> {completionCopy(p, s).poster}</span><span>See details →</span>
         </Link>
       ))}
+      {p.requestTerms.filter((t) => t.is_current !== 1).map((t) => (
+        <Link key={t.id} href="/student/steps/2" className="flash flash-err unlink" style={{ display: 'block' }}>
+          <strong>Registration for {t.name} is closed.</strong> Your {p.courses.filter((c) => c.term_id === t.id).map((c) => c.code).join(', ')} request can't be registered until Shasta College reopens it. Questions? See Help.
+        </Link>
+      ))}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', borderBottom: '2px solid var(--color-text)' }}>
         <div className="pad-sm noborder-sm" style={{ padding: 40, borderRight: '2px solid var(--color-divider)' }}>
-          <div className="kicker accent700">{p.term.name} · {p.school.name}</div>
+          <div className="kicker accent700">{p.termLabel} · {p.school.name}</div>
           <h1 className="h-sm" style={{ fontSize: 64, lineHeight: 1, margin: '14px 0 0', letterSpacing: '-0.03em' }}>
             {p.complete} of {p.total} steps<br />complete.
           </h1>
@@ -54,7 +59,7 @@ export default async function StudentDashboard() {
                 ) : n.status === 'changes' ? (
                   <Row label="Counselor" value={p.counselor ? displayName(p.counselor, true) : '—'} />
                 ) : (
-                  <Row label="Term" value={p.term.name} />
+                  <Row label="Term" value={p.termLabel} />
                 )}
                 <Link href={`/student/steps/${n.id}`} className="btn btn-white">
                   {n.status === 'current' || n.status === 'changes' ? 'Start step' : n.status === 'waiting_parent' && !p.parents.length ? 'Invite parent' : 'View status'} <span>→</span>
@@ -64,7 +69,7 @@ export default async function StudentDashboard() {
           ) : (
             <div>
               <div className="kicker" style={{ color: 'var(--color-accent-200)' }}>All done</div>
-              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>You're set for {p.term.name}</div>
+              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>You're set for {p.termLabel}</div>
             </div>
           )}
         </div>

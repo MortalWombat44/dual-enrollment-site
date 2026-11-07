@@ -41,13 +41,18 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
               Sign online, or upload a signed copy of the Shasta College Dual Enrollment consent form. {first} can't be approved until this is in.
             </p>
           </div>
-          <ConsentForm action={submitConsent} studentId={studentId} studentFirst={first} term={p.term.name} parentName={`${me.first_name} ${me.last_name}`} error={sp.error ? ERRORS[sp.error] : undefined} />
+          <ConsentForm action={submitConsent} studentId={studentId} studentFirst={first} term={p.termLabel} parentName={`${me.first_name} ${me.last_name}`} error={sp.error ? ERRORS[sp.error] : undefined} />
         </div>
         <div style={{ background: 'var(--color-surface)', display: 'flex', flexDirection: 'column' }}>
           <div className="pad-sm" style={{ padding: '32px 32px 20px', borderBottom: '2px solid var(--color-divider)' }}><div className="kicker">What you're agreeing to</div></div>
           <div className="pad-sm" style={{ padding: '20px 32px', borderBottom: '2px solid var(--color-divider)' }}>
             <div style={{ fontWeight: 700 }}>Courses</div>
-            <div style={{ fontSize: 14, marginTop: 4 }}>{p.courses.map((c) => `${c.code} ${c.title}`).join(' · ')} · {units} units</div>
+            {p.requestTerms.map((t) => (
+              <div key={t.id} style={{ fontSize: 14, marginTop: 4 }}>
+                <strong>{t.name}:</strong> {p.courses.filter((c) => c.term_id === t.id).map((c) => `${c.code} ${c.title}`).join(' · ')}
+              </div>
+            ))}
+            <div className="ink60" style={{ fontSize: 13, marginTop: 4 }}>{units} units in all</div>
           </div>
           <div className="pad-sm" style={{ padding: '20px 32px', borderBottom: '2px solid var(--color-divider)' }}>
             <div style={{ fontWeight: 700 }}>Cost</div>

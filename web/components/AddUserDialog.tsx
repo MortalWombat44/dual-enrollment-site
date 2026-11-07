@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 type School = { id: number; name: string; designation: string };
+type Term = { id: number; name: string };
 
-export function AddUserDialog({ action, schools, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; error?: string }) {
+export function AddUserDialog({ action, schools, terms, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; terms: Term[]; error?: string }) {
   const [role, setRole] = useState('counselor');
   const [school, setSchool] = useState<number>(schools[0]?.id ?? 0);
   const [level, setLevel] = useState('college');
@@ -28,7 +29,7 @@ export function AddUserDialog({ action, schools, error }: { action: (fd: FormDat
               {['student', 'counselor', 'admin'].map((r) => (
                 <label key={r} className="seg-opt" style={{ flex: 1 }}>
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} />
-                  {r[0].toUpperCase() + r.slice(1)}
+                  {r === 'counselor' ? 'High School Staff' : r[0].toUpperCase() + r.slice(1)}
                 </label>
               ))}
             </div>
@@ -40,7 +41,27 @@ export function AddUserDialog({ action, schools, error }: { action: (fd: FormDat
                 {schools.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.designation === 'CCAP' ? 'CCAP' : 'Non-CCAP'}</option>)}
               </select>
             </div>
-          ) : (
+          ) : null}
+          {role === 'counselor' && (
+            <div className="field">
+              <label htmlFor="staff_type">Staff type (for records)</label>
+              <select id="staff_type" name="staff_type" className="input" defaultValue="counselor">
+                <option value="counselor">Counselor</option>
+                <option value="admin">Admin</option>
+                <option value="teacher">Teacher</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          )}
+          {role === 'student' && (
+            <div className="field">
+              <label htmlFor="term">Term</label>
+              <select id="term" name="term" className="input">
+                {terms.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
+          {role === 'admin' && (
             <>
               <div className="field">
                 <label>Admin level</label>

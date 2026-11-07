@@ -7,7 +7,7 @@ export function PacketTable({ p }: { p: StudentProgress }) {
   if (app) rows.push({ doc: 'Shasta College application (CCCApply)', ...(app.completedAt ? { tag: 'Received', kind: 'accent', at: fmt(app.completedAt) } : { tag: 'Not started', kind: 'neutral', at: '—' }) });
   if (consent) rows.push({ doc: 'Parent / guardian consent', ...(consent.completedAt ? { tag: 'Received', kind: 'accent', at: fmt(consent.completedAt), href: `/consent/${p.student.id}` } : { tag: 'Waiting on parent', kind: 'neutral', at: '—' }) });
   if (courses) {
-    const codes = p.courses.map((c) => c.code).join(', ');
+    const codes = p.courses.map((c) => (c.term_name ? `${c.code} (${c.term_name})` : c.code)).join(', ');
     const label = codes ? `Course request — ${codes}` : 'Course request';
     const status = !courses.completedAt
       ? (courses.status === 'changes' ? { tag: 'Changes requested', kind: 'neutral' as const } : { tag: 'Not submitted', kind: 'neutral' as const })

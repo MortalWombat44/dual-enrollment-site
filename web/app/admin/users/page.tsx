@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { addUser, updateAdmin } from '@/lib/admin-actions';
+import { addUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
+import { activeTerms } from '@/lib/workflow';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
 import { AddUserDialog } from '@/components/AddUserDialog';
 import { Flash } from '@/components/chrome';
@@ -10,7 +11,7 @@ import { Flash } from '@/components/chrome';
 export const dynamic = 'force-dynamic';
 
 const ROLE_TABS = [
-  ['', 'All'], ['student', 'Students'], ['parent', 'Parents'], ['counselor', 'Counselors'], ['admin', 'Admins'],
+  ['', 'All'], ['student', 'Students'], ['parent', 'Parents'], ['counselor', 'High School Staff'], ['admin', 'Admins'],
 ] as const;
 const ERRORS: Record<string, string> = {
   name: 'Enter a first and last name.', email: 'Enter a valid email.', role: 'Pick a role. Parents are invited by their student from the consent step.',
@@ -18,7 +19,9 @@ const ERRORS: Record<string, string> = {
   self: "You can't remove your own super admin access.",
 };
 
-type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number };
+const STAFF_LABEL: Record<string, string> = { counselor: 'Counselor', admin: 'Admin', teacher: 'Teacher', other: 'Other' };
+
+type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; staff_type: string | null };
 
 export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string }> }) {
   const me = await requireAdmin('super');
@@ -30,7 +33,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   if (role) { where.push('u.role = ?'); args.push(role); }
   if (q) { where.push("(u.first_name || ' ' || u.last_name LIKE ? OR u.email LIKE ?)"); args.push(`%${q}%`, `%${q}%`); }
   const rows = db().prepare(
-    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, s.name AS school
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.staff_type, s.name AS school
      FROM users u LEFT JOIN schools s ON s.id = u.school_id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY u.created_at DESC, u.id DESC LIMIT 200`).all(...args) as Row[];
@@ -41,6 +44,11 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const tabHref = (r: string) => '/admin/users' + (r || q ? '?' + new URLSearchParams({ ...(r ? { role: r } : {}), ...(q ? { q } : {}) }) : '');
 
   const schools = db().prepare('SELECT id, name, designation FROM schools ORDER BY name').all() as { id: number; name: string; designation: string }[];
+  const primaryOf = new Map<number, number[]>();
+  for (const r of db().prepare('SELECT admin_id, school_id FROM admin_schools').all() as { admin_id: number; school_id: number }[]) {
+    primaryOf.set(r.admin_id, [...(primaryOf.get(r.admin_id) ?? []), r.school_id]);
+  }
+  const short = (name: string) => name.replace(' High School', ' HS');
 
   return (
     <AdminShell me={me} current="users">
@@ -75,7 +83,12 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                 <td>
                   {u.role === 'admin' ? (
                     <details>
-                      <summary style={{ cursor: 'pointer' }}>{u.admin_level === 'super' ? 'Super admin' : 'College admin'}{u.is_college_counselor ? ' · College counselor' : ''}</summary>
+                      <summary style={{ cursor: 'pointer' }}>
+                        {u.admin_level === 'super' ? 'Super admin' : 'College admin'}{u.is_college_counselor ? ' · College counselor' : ''}
+                        {(primaryOf.get(u.id) ?? []).length > 0 && (
+                          <div className="ink60" style={{ fontSize: 12 }}>Primary: {schools.filter((x) => primaryOf.get(u.id)!.includes(x.id)).map((x) => short(x.name)).join(', ')}</div>
+                        )}
+                      </summary>
                       <form action={updateAdmin} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 0' }}>
                         <input type="hidden" name="id" value={u.id} />
                         <select name="admin_level" className="input" defaultValue={u.admin_level ?? 'college'}>
@@ -85,7 +98,26 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
                           <input type="checkbox" name="college_counselor" defaultChecked={!!u.is_college_counselor} style={{ accentColor: 'var(--color-accent)' }} /> College counselor
                         </label>
+                        <fieldset style={{ border: '1px solid var(--color-divider)', padding: '6px 10px', margin: 0 }}>
+                          <legend style={{ fontSize: 12, padding: '0 4px' }}>Primary schools (shown first in their to-do)</legend>
+                          {schools.map((x) => (
+                            <label key={x.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                              <input type="checkbox" name="primary" value={x.id} defaultChecked={(primaryOf.get(u.id) ?? []).includes(x.id)} style={{ accentColor: 'var(--color-accent)' }} /> {x.name}
+                            </label>
+                          ))}
+                        </fieldset>
                         <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Save</button>
+                      </form>
+                    </details>
+                  ) : u.role === 'counselor' ? (
+                    <details>
+                      <summary style={{ cursor: 'pointer' }}>High School Staff · {STAFF_LABEL[u.staff_type ?? 'counselor']}</summary>
+                      <form action={updateStaffType} style={{ display: 'flex', gap: 6, padding: '8px 0' }}>
+                        <input type="hidden" name="id" value={u.id} />
+                        <select name="staff_type" className="input" defaultValue={u.staff_type ?? 'counselor'} aria-label="Staff type">
+                          {Object.entries(STAFF_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                        <button className="btn btn-secondary">Save</button>
                       </form>
                     </details>
                   ) : u.role[0].toUpperCase() + u.role.slice(1)}
@@ -105,7 +137,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           </tbody>
         </table>
       </div>
-      {sp.add && <AddUserDialog action={addUser} schools={schools} error={sp.error ? ERRORS[sp.error] : undefined} />}
+      {sp.add && <AddUserDialog action={addUser} schools={schools} terms={activeTerms()} error={sp.error ? ERRORS[sp.error] : undefined} />}
     </AdminShell>
   );
 }

@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
-import { currentTerm, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
+import { nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
 import { approve, sendBack } from '@/lib/counselor-actions';
 import { TopBar, Flash } from '@/components/chrome';
+import { TermCourses } from '@/components/TermCourses';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
   const me = await requireRole('counselor');
   const sp = await searchParams;
   const school = me.school_id ? getSchool(me.school_id) : null;
-  const term = currentTerm();
+  const term = nextRegistration();
   const ids = (db().prepare("SELECT id FROM users WHERE role = 'student' AND school_id = ? ORDER BY last_name, first_name").all(me.school_id) as { id: number }[]).map((r) => r.id);
   const all = ids.map(getProgress).filter((p): p is StudentProgress => !!p);
   const s4 = (p: StudentProgress) => p.steps.find((s) => s.id === 4);
@@ -51,7 +52,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
         <Stat label="Waiting on you" value={String(groups.ready.length)} hero />
         <Stat label="Missing parent consent" value={String(missingConsent)} />
         <Stat label="Approved this term" value={String(groups.approved.length)} />
-        <Stat label="Registration opens" value={fmt(term.registration_opens)} last />
+        <Stat label={`Next registration · ${term.name}`} value={fmt(term.registration_opens)} last />
       </div>
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 420px', flex: 1 }}>
         <div className="pad-sm noborder-sm" style={{ padding: '24px 40px 40px', borderRight: '2px solid var(--color-text)', minWidth: 0 }}>
@@ -125,8 +126,8 @@ function ReviewPanel({ p }: { p: StudentProgress | null }) {
         ))}
       </div>
       <div className="pad-sm" style={{ padding: '20px 32px', borderBottom: '2px solid var(--color-divider)' }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>Courses requested</div>
-        {p.courses.length ? p.courses.map((c) => <div key={c.id} style={{ fontSize: 14, marginTop: 6 }}>{c.code} · {c.units} units · {c.schedule}</div>) : <div className="ink60" style={{ fontSize: 14, marginTop: 6 }}>None yet</div>}
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Courses requested</div>
+        {p.courses.length ? <TermCourses courses={p.courses} terms={p.requestTerms} compact /> : <div className="ink60" style={{ fontSize: 14, marginTop: 6 }}>None yet</div>}
       </div>
       {canAct ? (
         <form style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>

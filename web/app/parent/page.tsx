@@ -5,6 +5,7 @@ import { sharesWithParents } from '@/lib/access';
 import { displayName, fmt, getProgress, pad, studentsForParent } from '@/lib/workflow';
 import { upNextLine } from '@/lib/stepcopy';
 import { TopBar, SegBar, Flash } from '@/components/chrome';
+import { RevokeNote } from '@/components/RevokeNote';
 import { StepGrid } from '@/components/StepGrid';
 
 export const dynamic = 'force-dynamic';
@@ -39,13 +40,16 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
         <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : null} />
         <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', borderBottom: '2px solid var(--color-text)' }}>
           <div className="pad-sm noborder-sm" style={{ padding: 40, borderRight: '2px solid var(--color-divider)' }}>
-            <div className="kicker accent700">{p.term.name} · Dual Enrollment</div>
+            <div className="kicker accent700">{p.termLabel} · Dual Enrollment</div>
             <h1 className="h-sm" style={{ fontSize: 56, lineHeight: 1.02, margin: '14px 0 0', letterSpacing: '-0.03em' }}>{kid.first_name}'s progress<br />is private.</h1>
             <p style={{ fontSize: 17, maxWidth: 560, margin: '18px 0 0', textWrap: 'pretty' }}>
               {kid.first_name} hasn't shared their dual enrollment records with you. If they turn on sharing in their account, you'll see their steps, courses and counselor review here.
             </p>
             {signedByMe && (
               <p style={{ fontSize: 15, margin: '18px 0 0' }}><a href={`/consent/${kid.id}`}>View the consent you signed</a></p>
+            )}
+            {!consentNeeded && p.steps.find((s) => s.id === 3)?.status === 'complete' && (
+              <div style={{ marginTop: 20, maxWidth: 640 }}><RevokeNote student={kid.first_name} /></div>
             )}
           </div>
           <div className="pad-sm" style={{ padding: 40, background: consentNeeded ? 'var(--color-accent)' : 'var(--color-surface)', color: consentNeeded ? '#fff' : undefined, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 24 }}>
@@ -78,7 +82,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
   const pct = Math.round((p.complete / p.total) * 100);
   const inFlight = p.next && (p.next.status === 'in_review' || p.next.status === 'waiting_parent') ? 1 : 0;
   const line = p.done
-    ? `${kid.first_name} has finished every required step for ${p.term.name}.`
+    ? `${kid.first_name} has finished every required step for ${p.termLabel}.`
     : needsYou
       ? `${kid.first_name}'s courses are picked. Your consent is the next step.`
       : `${kid.first_name} is cleared through ${cleared?.short.toLowerCase() ?? 'the first step'}.${p.next ? ` ${p.next.short} is next.` : ''}`;
@@ -94,7 +98,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
       <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : null} />
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', borderBottom: '2px solid var(--color-text)' }}>
         <div className="pad-sm noborder-sm" style={{ padding: 40, borderRight: '2px solid var(--color-divider)' }}>
-          <div className="kicker accent700">{p.term.name} · {p.school.name}</div>
+          <div className="kicker accent700">{p.termLabel} · {p.school.name}</div>
           <h1 className="h-sm" style={{ fontSize: 64, lineHeight: 1, margin: '14px 0 0', letterSpacing: '-0.03em' }}>{p.complete} of {p.total} steps<br />complete.</h1>
           <p style={{ fontSize: 17, maxWidth: 520, margin: '18px 0 0', textWrap: 'pretty' }}>{line}</p>
           <SegBar total={p.total} on={p.complete} half={inFlight} style={{ marginTop: 32 }} />
@@ -120,10 +124,13 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
               </div>
             </>
           ) : (
-            <div><div className="kicker" style={{ opacity: 0.85 }}>All done</div><div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>{kid.first_name} is set for {p.term.name}</div></div>
+            <div><div className="kicker" style={{ opacity: 0.85 }}>All done</div><div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10 }}>{kid.first_name} is set for {p.termLabel}</div></div>
           )}
         </div>
       </div>
+      {consent?.status === 'complete' && (
+        <div className="pad-sm" style={{ padding: '24px 40px 0', maxWidth: 820 }}><RevokeNote student={kid.first_name} /></div>
+      )}
       <div className="pad-sm" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '28px 40px 16px' }}>
         <h3 style={{ margin: 0, fontSize: 20 }}>All steps</h3>
         <span className="ink60" style={{ fontSize: 13 }}>Steps unlock in order</span>

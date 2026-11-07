@@ -22,7 +22,8 @@ Demo accounts (password `shasta2027`):
 | Parent of Maya (Maya shares her progress) | laura.rivera@gmail.com |
 | Counselor, Enterprise HS | ralvarez@suhsd.net |
 | Super admin | dortiz@shastacollege.edu |
-| College admin + college counselor | jkim@shastacollege.edu |
+| College admin + college counselor (primary school: Enterprise HS) | jkim@shastacollege.edu |
+| Super admin (password `ShastaDE2027`) | tmiller@shastacollege.edu |
 
 ## Screens → routes
 
@@ -38,7 +39,9 @@ Demo accounts (password `shasta2027`):
 | 3a Users + Add user (super admin) | `/admin/users` |
 | 3b Schools + Add school | `/admin/schools` |
 | 3c School designation + step rules | `/admin/schools/[id]` |
-| Term + registration date (super admin) | `/admin/terms` |
+| Terms: several at once, registration dates, registration allowed on/off (super admin) | `/admin/terms` |
+| Admin reports (Clear units wait times and counts) | `/admin/reports` |
+| Student sign-up (picks their high school) | `/signup` |
 
 ## Steps (in order)
 
@@ -59,6 +62,17 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 - **College counselor**: a flag on any admin. Only these admins can approve or decline classes with a prerequisite. A declined class comes off the request; if nothing is left, the student goes back to Course selection with the note.
 - Whenever a reviewer sends classes back, Course selection reopens and the new classes go through High school approval, Clear units and Prerequisite review again.
 - **Super admin**: everything above, plus Users (create users and admins, set admin level and the college counselor flag), Schools (add schools, edit step rules) and Terms (registration date).
+
+## Terms, accounts and flags
+
+- **Terms:** a super admin can have several terms open at once. Students pick a term for every class they request, from the terms with **registration allowed**. The unit limit is per term. If registration is turned off for a term, classes already in it are flagged to the student, counselor and the admin clearing units. The Register step follows the earliest registration date among the student's terms.
+- **Sign-up:** students create their own account at `/signup` and pick their high school. The Shasta College ID is optional there and can be added later in Account.
+- **Shared IDs:** a Shasta College ID on more than one student account is flagged in the admin Students page (Shared IDs tab). Admins can correct the ID from the side panel.
+- **High school changes:** students request a change from Account; admins approve (moves the student) or decline it from the School changes tab.
+- **Primary schools:** super admins tick each admin's primary schools under Users. Those students sort first in that admin's queue and drive their Reports page.
+- **High School Staff:** the high school role (shown as High School Staff) has a record-keeping type: Counselor, Admin, Teacher or Other. All types have the same access.
+- **Parent consent is one-time:** once signed it covers future terms. Reopening earlier steps keeps it; only reopening the Parent consent step itself removes it (e.g. if the parent revokes). Parents see a note with the revoke email, which is still a placeholder: set `CONSENT_REVOKE_EMAIL` in `lib/constants.ts`.
+- **Seeded named accounts** (`ensureAccounts` in `lib/db.ts`) are created on every fresh database, only if missing.
 
 ## Workflow rules
 

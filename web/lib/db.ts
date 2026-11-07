@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
   counselor_id INTEGER REFERENCES users(id),
   admin_level TEXT CHECK (admin_level IN ('college','super')),
   is_college_counselor INTEGER NOT NULL DEFAULT 0,
+  staff_type TEXT CHECK (staff_type IN ('counselor','admin','teacher','other')), -- high school staff only, for record keeping
   share_with_parents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS school_courses (
 CREATE TABLE IF NOT EXISTS course_requests (
   student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   course_id INTEGER NOT NULL REFERENCES courses(id),
+  term_id INTEGER REFERENCES terms(id),
   PRIMARY KEY (student_id, course_id)
 );
 CREATE TABLE IF NOT EXISTS files (
@@ -104,6 +106,22 @@ CREATE TABLE IF NOT EXISTS files (
   size INTEGER NOT NULL,
   stored_name TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS admin_schools (
+  admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  PRIMARY KEY (admin_id, school_id)
+);
+CREATE TABLE IF NOT EXISTS school_change_requests (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_school_id INTEGER REFERENCES schools(id),
+  to_school_id INTEGER NOT NULL REFERENCES schools(id),
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','approved','declined')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  handled_by INTEGER REFERENCES users(id),
+  handled_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -155,6 +173,9 @@ export function db(): Db {
     migrate(conn);
     const count = conn.prepare('SELECT COUNT(*) AS n FROM steps').get() as { n: number };
     if (count.n === 0) seed(conn);
+    ensureAccounts(conn);
+    // Class requests made before classes had terms get the student's term.
+    conn.exec('UPDATE course_requests SET term_id = (SELECT term_id FROM enrollments e WHERE e.student_id = course_requests.student_id) WHERE term_id IS NULL');
     _db = conn;
   }
   const conn = _db;
@@ -190,7 +211,9 @@ function seed(d: DatabaseSync) {
   const insStep = d.prepare('INSERT INTO steps (id, name, short_name, description) VALUES (?,?,?,?)');
   for (const s of STEP_DEFS) insStep.run(s.id, s.name, s.short, s.description);
 
+  // Two terms open at once: Spring (Dec 2, 8:00 AM PT) and Summer (Apr 12, 8:00 AM PT).
   d.prepare("INSERT INTO terms (id, name, registration_opens, is_current) VALUES (1, 'Spring 2027', '2026-12-02T16:00:00Z', 1)").run();
+  d.prepare("INSERT INTO terms (id, name, registration_opens, is_current) VALUES (2, 'Summer 2027', '2027-04-12T15:00:00Z', 1)").run();
 
   const schools: [string, string, 'CCAP' | 'NON_CCAP', string | null, string | null][] = [
     ['Anderson High School', 'Anderson Union HSD', 'CCAP', 'CCAP-AUHSD-2025', '2028-06-30'],
@@ -253,6 +276,7 @@ function seed(d: DatabaseSync) {
   d.prepare("UPDATE users SET admin_level = 'college', is_college_counselor = 1 WHERE id = ?").run(jordan);
   const alvarez = user('Rosa', 'Alvarez', 'ralvarez@suhsd.net', 'counselor', enterprise, { title: 'Ms.' });
   user('Tom', 'Becker', 'tbecker@andersonhigh.org', 'counselor', anderson, { status: 'invited', title: 'Mr.' });
+  d.exec("UPDATE users SET staff_type = 'counselor' WHERE role = 'counselor'");
 
   const insEnroll = d.prepare('INSERT INTO enrollments (student_id, term_id, started_at, step_modes) VALUES (?,1,?,?)');
   const insProg = d.prepare('INSERT INTO step_progress (student_id, step_id, status, completed_at, data) VALUES (?,?,?,?,?)');
@@ -296,8 +320,57 @@ function seed(d: DatabaseSync) {
 
   // A not-yet-started student with no parent account yet: they invite one from step 03.
   const jamie = user('Jamie', 'Lee', 'jamie.l@student.andersonhigh.org', 'student', anderson, { grade: 11, gpa: 3.3, num: '0413002' });
-  d.prepare('INSERT INTO enrollments (student_id, term_id, started_at, step_modes) VALUES (?,1,NULL,NULL)').run(jamie);
+  d.prepare('INSERT INTO enrollments (student_id, term_id, started_at, step_modes) VALUES (?,2,NULL,NULL)').run(jamie); // Summer 2027
+
+  // Jordan's primary school is Enterprise HS.
+  d.prepare('INSERT INTO admin_schools (admin_id, school_id) VALUES (?,?)').run(jordan, enterprise);
+
+  // History for the Reports page: students whose units were already cleared.
+  const done: { f: string; l: string; school: string; by: number; ready: string; cleared: string }[] = [
+    { f: 'Olivia', l: 'Park', school: 'Enterprise High School', by: jordan, ready: '2026-10-20T17:00:00Z', cleared: '2026-10-22T19:00:00Z' },
+    { f: 'Daniel', l: 'Ortega', school: 'Enterprise High School', by: jordan, ready: '2026-10-27T17:00:00Z', cleared: '2026-10-28T01:00:00Z' },
+    { f: 'Mason', l: 'Reed', school: 'Foothill High School', by: jordan, ready: '2026-10-23T17:00:00Z', cleared: '2026-10-26T17:00:00Z' },
+    { f: 'Chloe', l: 'Diaz', school: 'Shasta High School', by: dana, ready: '2026-10-26T17:00:00Z', cleared: '2026-10-27T17:00:00Z' },
+  ];
+  let n = 500;
+  for (const x of done) {
+    const sid = schoolIds[x.school];
+    const id = user(x.f, x.l, `${x.f.toLowerCase()}.${x.l[0].toLowerCase()}@student.example.org`, 'student', sid, { grade: 12, gpa: 3.5, num: `0413${n++}` });
+    const t0 = new Date(new Date(x.ready).getTime() - 20 * 864e5).toISOString();
+    insEnroll.run(id, t0, modesFor(sid));
+    insProg.run(id, 1, 'complete', t0, JSON.stringify({ confirmation: 'CCC-' + n }));
+    insProg.run(id, 2, 'complete', new Date(new Date(x.ready).getTime() - 10 * 864e5).toISOString(), null);
+    insReq.run(id, courseIds['ENGL 1A']);
+    insProg.run(id, 3, 'complete', new Date(new Date(x.ready).getTime() - 5 * 864e5).toISOString(), JSON.stringify({ method: 'esign', signer: `Parent of ${x.f} ${x.l}` }));
+    // The last step before Clear units finishes at `ready`; Clear units at `cleared`.
+    const hs = (d.prepare('SELECT mode FROM school_steps WHERE school_id = ? AND step_id = 4').get(sid) as { mode: string }).mode;
+    if (hs !== 'off') insProg.run(id, 4, 'complete', x.ready, JSON.stringify({ counselor_id: alvarez }));
+    else d.prepare('UPDATE step_progress SET completed_at = ? WHERE student_id = ? AND step_id = 3').run(x.ready, id);
+    insProg.run(id, 7, 'complete', x.cleared, JSON.stringify({ admin_id: x.by, school_id: sid }));
+  }
+
+  // Examples for the admin flags: two accounts with the same Shasta College ID,
+  // and a student asking to change high school.
+  d.prepare("UPDATE users SET student_number = '0412971' WHERE email = 'daniel.o@student.example.org'").run();
+  const ava = (d.prepare("SELECT id FROM users WHERE email = 'ava.t@student.suhsd.net'").get() as { id: number }).id;
+  d.prepare('INSERT INTO school_change_requests (student_id, from_school_id, to_school_id, note) VALUES (?,?,?,?)')
+    .run(ava, enterprise, schoolIds['Shasta High School'], 'I transferred to Shasta High in October.');
   d.exec('COMMIT');
+}
+
+/**
+ * Named accounts that must exist on every database, including a freshly reset one.
+ * Created only if missing, so a changed password is never overwritten.
+ */
+function ensureAccounts(d: DatabaseSync) {
+  const accounts = [
+    { first: 'Tabitha', last: 'Miller', email: 'tmiller@shastacollege.edu', password: 'ShastaDE2027', level: 'super' },
+  ];
+  for (const a of accounts) {
+    if (d.prepare('SELECT 1 FROM users WHERE email = ?').get(a.email)) continue;
+    d.prepare("INSERT INTO users (first_name, last_name, email, role, status, password_hash, admin_level) VALUES (?,?,?,'admin','active',?,?)")
+      .run(a.first, a.last, a.email, hashPassword(a.password), a.level);
+  }
 }
 
 export function cryptoToken() {
@@ -315,9 +388,15 @@ function migrate(d: DatabaseSync) {
     // Existing admins keep full access.
     d.exec("UPDATE users SET admin_level = 'super' WHERE role = 'admin'");
   }
+  if (!cols.includes('staff_type')) {
+    d.exec("ALTER TABLE users ADD COLUMN staff_type TEXT CHECK (staff_type IN ('counselor','admin','teacher','other'))");
+    d.exec("UPDATE users SET staff_type = 'counselor' WHERE role = 'counselor'");
+  }
   if (!cols.includes('is_college_counselor')) {
     d.exec('ALTER TABLE users ADD COLUMN is_college_counselor INTEGER NOT NULL DEFAULT 0');
   }
+  const reqCols = (d.prepare('PRAGMA table_info(course_requests)').all() as { name: string }[]).map((c) => c.name);
+  if (!reqCols.includes('term_id')) d.exec('ALTER TABLE course_requests ADD COLUMN term_id INTEGER REFERENCES terms(id)');
   const courseCols = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
   if (!courseCols.includes('prerequisite')) d.exec('ALTER TABLE courses ADD COLUMN prerequisite TEXT');
   // Steps 7 (Clear units) and 8 (Prerequisite review) arrived after launch: add them, on for every school.

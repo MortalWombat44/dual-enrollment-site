@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireRole } from './auth';
 import { cryptoToken, db, tx } from './db';
-import { completeStep, getProgress, schoolCourses } from './workflow';
+import { activeTerms, completeStep, getProgress, schoolCourses } from './workflow';
 
 import { MAX_UNITS } from './constants';
 
@@ -26,13 +26,19 @@ export async function submitCourses(formData: FormData) {
   const { me, p } = await stepFor(2, ['current', 'changes']);
   const offered = new Map(schoolCourses(p.school.id).map((c) => [c.id, c]));
   const picked = [...new Set(formData.getAll('course').map(Number))].filter((id) => offered.has(id));
-  const units = picked.reduce((n, id) => n + offered.get(id)!.units, 0);
   if (picked.length === 0) redirect('/student/steps/2?error=none');
-  if (units > MAX_UNITS) redirect('/student/steps/2?error=units');
+  // Every class needs a term that's open for registration; the unit limit is per term.
+  const open = new Set(activeTerms().map((t) => t.id));
+  const termOf = new Map(picked.map((id) => [id, Number(formData.get(`term_${id}`))]));
+  if ([...termOf.values()].some((t) => !open.has(t))) redirect('/student/steps/2?error=term');
+  const perTerm = new Map<number, number>();
+  for (const id of picked) perTerm.set(termOf.get(id)!, (perTerm.get(termOf.get(id)!) ?? 0) + offered.get(id)!.units);
+  if ([...perTerm.values()].some((u) => u > MAX_UNITS)) redirect('/student/steps/2?error=units');
+  const units = picked.reduce((n, id) => n + offered.get(id)!.units, 0);
   tx(() => {
     db().prepare('DELETE FROM course_requests WHERE student_id = ?').run(me.id);
-    const ins = db().prepare('INSERT INTO course_requests (student_id, course_id) VALUES (?,?)');
-    for (const id of picked) ins.run(me.id, id);
+    const ins = db().prepare('INSERT INTO course_requests (student_id, course_id, term_id) VALUES (?,?,?)');
+    for (const id of picked) ins.run(me.id, id, termOf.get(id)!);
     db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(me.id);
   });
   completeStep(me.id, 2, { units });
@@ -82,4 +88,31 @@ export async function inviteParent(formData: FormData) {
     return id;
   });
   redirect(`/student/steps/3?invited=${parentId}`);
+}
+
+export async function requestSchoolChange(formData: FormData) {
+  const me = await requireRole('student');
+  const to = Number(formData.get('school'));
+  const note = String(formData.get('note') || '').trim().slice(0, 500) || null;
+  if (!to || to === me.school_id || !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(to)) redirect('/student/account?error=school');
+  tx(() => {
+    // One open request at a time: a new one replaces the old.
+    db().prepare("DELETE FROM school_change_requests WHERE student_id = ? AND status = 'open'").run(me.id);
+    db().prepare('INSERT INTO school_change_requests (student_id, from_school_id, to_school_id, note) VALUES (?,?,?,?)').run(me.id, me.school_id, to, note);
+  });
+  redirect('/student/account?saved=school_request');
+}
+
+export async function cancelSchoolChange() {
+  const me = await requireRole('student');
+  db().prepare("DELETE FROM school_change_requests WHERE student_id = ? AND status = 'open'").run(me.id);
+  redirect('/student/account?saved=school_cancel');
+}
+
+export async function setMyStudentNumber(formData: FormData) {
+  const me = await requireRole('student');
+  const num = String(formData.get('student_number') || '').trim().slice(0, 20) || null;
+  if (num && !/^[A-Za-z0-9-]+$/.test(num)) redirect('/student/account?error=id');
+  db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
+  redirect('/student/account?saved=id');
 }
