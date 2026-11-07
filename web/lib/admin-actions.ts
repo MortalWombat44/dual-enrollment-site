@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
 import { clearFailures, createResetToken } from './security';
+import { dismissRetireNudge, retireClass, retirableClasses } from './retire';
 import { cryptoToken, db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
 import { currentTerm, fromPacificInput } from './workflow';
 
@@ -45,6 +46,8 @@ export async function addUser(formData: FormData) {
       const termId = Number(formData.get('term'));
       const term = termId && db().prepare('SELECT id FROM terms WHERE id = ?').get(termId) ? termId : currentTerm().id;
       db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, term);
+      const grad = Number(formData.get('grad_year'));
+      if (Number.isInteger(grad) && grad > 2000 && grad < 2100) db().prepare('UPDATE users SET grad_year = ? WHERE id = ?').run(grad, uid);
     }
     return uid;
   });
@@ -152,7 +155,8 @@ export async function setUserDisabled(formData: FormData) {
   const safeBack = back.startsWith('/admin/users') ? back : '/admin/users';
   if (id === me.id) redirect(safeBack + (safeBack.includes('?') ? '&' : '?') + 'error=self_disable');
   tx(() => {
-    db().prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disable ? 1 : 0, id);
+    // Enabling also un-retires.
+    db().prepare('UPDATE users SET disabled = ?, retired_at = CASE WHEN ? = 0 THEN NULL ELSE retired_at END WHERE id = ?').run(disable ? 1 : 0, disable ? 1 : 0, id);
     if (disable) db().prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
   });
   redirect(safeBack + (safeBack.includes('?') ? '&' : '?') + (disable ? 'disabled=' : 'enabled=') + id);
@@ -234,4 +238,19 @@ export async function unlockUser(formData: FormData) {
   const email = String(formData.get('email') || '');
   clearFailures(email);
   redirect('/admin/users?unlocked=1');
+}
+
+/** Super admin: retire every account in a graduated class. */
+export async function retireGradClass(formData: FormData) {
+  await requireAdmin('super');
+  const y = Number(formData.get('grad_year'));
+  if (!retirableClasses().some((c) => c.grad_year === y)) redirect('/admin/users?error=retire#retire');
+  const r = retireClass(y);
+  redirect(`/admin/users?retired=${y}&rs=${r.students}&rp=${r.parents}#retire`);
+}
+
+export async function dismissRetireReminder() {
+  await requireAdmin('super');
+  dismissRetireNudge();
+  redirect('/admin/users');
 }

@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT,
   invite_token TEXT UNIQUE,
   grade INTEGER,
-  gpa REAL,
+  gpa REAL, -- no longer used (GPA was removed from student accounts)
   student_number TEXT,
   counselor_id INTEGER REFERENCES users(id),
   admin_level TEXT CHECK (admin_level IN ('college','super')),
@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS users (
   staff_type TEXT CHECK (staff_type IN ('counselor','admin','teacher','other')), -- high school staff only, for record keeping
   share_with_parents INTEGER NOT NULL DEFAULT 0,
   disabled INTEGER NOT NULL DEFAULT 0, -- super admins can switch off access
+  retired_at TEXT, -- set when retired by graduation year (also disabled)
+  grad_year INTEGER, -- students: high school graduation year
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS parent_links (
@@ -144,6 +146,10 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -295,12 +301,12 @@ function seed(d: DatabaseSync) {
   for (const [school, code, title, units, period, teacher, prereq] of de) insDE.run(code, title, units, schoolIds[school], period, teacher, prereq);
 
   const pw = hashPassword('shasta2027');
-  const insUser = d.prepare(`INSERT INTO users (first_name, last_name, email, role, school_id, status, title, password_hash, invite_token, grade, gpa, student_number, counselor_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  const user = (f: string, l: string, e: string, role: string, school: number | null, extra: Partial<{ status: string; title: string; grade: number; gpa: number; num: string; counselor: number }> = {}) =>
+  const insUser = d.prepare(`INSERT INTO users (first_name, last_name, email, role, school_id, status, title, password_hash, invite_token, grade, student_number, counselor_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const user = (f: string, l: string, e: string, role: string, school: number | null, extra: Partial<{ status: string; title: string; grade: number; num: string; counselor: number }> = {}) =>
     Number(insUser.run(f, l, e, role, school, extra.status ?? 'active', extra.title ?? null,
       extra.status === 'invited' ? null : pw, extra.status === 'invited' ? cryptoToken() : null,
-      extra.grade ?? null, extra.gpa ?? null, extra.num ?? null, extra.counselor ?? null).lastInsertRowid);
+      extra.grade ?? null, extra.num ?? null, extra.counselor ?? null).lastInsertRowid);
 
   const dana = user('Dana', 'Ortiz', 'dortiz@shastacollege.edu', 'admin', null, { title: 'Super admin' });
   const jordan = user('Jordan', 'Kim', 'jkim@shastacollege.edu', 'admin', null, { title: 'Outreach' });
@@ -317,18 +323,18 @@ function seed(d: DatabaseSync) {
   const modesFor = (sid: number) => JSON.stringify(Object.fromEntries(
     (d.prepare('SELECT step_id, mode FROM school_steps WHERE school_id = ?').all(sid) as { step_id: number; mode: string }[]).map((r) => [r.step_id, r.mode])));
 
-  const students: { f: string; l: string; e: string; grade: number; gpa: number; num: string; courses: string[]; days: [string, string?, string?] }[] = [
-    { f: 'Maya', l: 'Rivera', e: 'maya.r@student.suhsd.net', grade: 11, gpa: 3.7, num: '0412893', courses: ['ENGL 1A', 'COMM 1'], days: ['2026-10-14T17:10:00Z', '2026-10-28T22:05:00Z', '2026-11-04T03:42:00Z'] },
-    { f: 'Ethan', l: 'Brooks', e: 'ethan.b@student.suhsd.net', grade: 12, gpa: 3.4, num: '0412910', courses: ['MATH 13', 'HIST 17'], days: ['2026-10-12T18:00:00Z', '2026-10-25T18:00:00Z', '2026-11-05T18:00:00Z'] },
-    { f: 'Sofia', l: 'Nguyen', e: 'sofia.n@student.suhsd.net', grade: 11, gpa: 3.9, num: '0412933', courses: ['PSY 1'], days: ['2026-10-15T18:00:00Z', '2026-10-29T18:00:00Z', '2026-11-05T19:00:00Z'] },
-    { f: 'Lucas', l: 'Hart', e: 'lucas.h@student.suhsd.net', grade: 12, gpa: 3.1, num: '0412947', courses: ['ENGL 1A', 'AJ 1'], days: ['2026-10-16T18:00:00Z', '2026-10-30T18:00:00Z', '2026-11-06T18:00:00Z'] },
-    { f: 'Ava', l: 'Thompson', e: 'ava.t@student.suhsd.net', grade: 10, gpa: 3.8, num: '0412958', courses: ['COMM 1'], days: ['2026-10-20T18:00:00Z', '2026-11-01T18:00:00Z', '2026-11-07T17:00:00Z'] },
-    { f: 'Noah', l: 'Patel', e: 'noah.p@student.suhsd.net', grade: 11, gpa: 3.5, num: '0412966', courses: ['PSY 1', 'COMM 1'], days: ['2026-10-21T18:00:00Z', '2026-11-02T18:00:00Z'] },
-    { f: 'Isabella', l: 'Cruz', e: 'isabella.c@student.suhsd.net', grade: 12, gpa: 3.6, num: '0412971', courses: ['ENGL 1A'], days: ['2026-10-22T18:00:00Z', '2026-11-03T18:00:00Z'] },
+  const students: { f: string; l: string; e: string; grade: number; num: string; courses: string[]; days: [string, string?, string?] }[] = [
+    { f: 'Maya', l: 'Rivera', e: 'maya.r@student.suhsd.net', grade: 11, num: '0412893', courses: ['ENGL 1A', 'COMM 1'], days: ['2026-10-14T17:10:00Z', '2026-10-28T22:05:00Z', '2026-11-04T03:42:00Z'] },
+    { f: 'Ethan', l: 'Brooks', e: 'ethan.b@student.suhsd.net', grade: 12, num: '0412910', courses: ['MATH 13', 'HIST 17'], days: ['2026-10-12T18:00:00Z', '2026-10-25T18:00:00Z', '2026-11-05T18:00:00Z'] },
+    { f: 'Sofia', l: 'Nguyen', e: 'sofia.n@student.suhsd.net', grade: 11, num: '0412933', courses: ['PSY 1'], days: ['2026-10-15T18:00:00Z', '2026-10-29T18:00:00Z', '2026-11-05T19:00:00Z'] },
+    { f: 'Lucas', l: 'Hart', e: 'lucas.h@student.suhsd.net', grade: 12, num: '0412947', courses: ['ENGL 1A', 'AJ 1'], days: ['2026-10-16T18:00:00Z', '2026-10-30T18:00:00Z', '2026-11-06T18:00:00Z'] },
+    { f: 'Ava', l: 'Thompson', e: 'ava.t@student.suhsd.net', grade: 10, num: '0412958', courses: ['COMM 1'], days: ['2026-10-20T18:00:00Z', '2026-11-01T18:00:00Z', '2026-11-07T17:00:00Z'] },
+    { f: 'Noah', l: 'Patel', e: 'noah.p@student.suhsd.net', grade: 11, num: '0412966', courses: ['PSY 1', 'COMM 1'], days: ['2026-10-21T18:00:00Z', '2026-11-02T18:00:00Z'] },
+    { f: 'Isabella', l: 'Cruz', e: 'isabella.c@student.suhsd.net', grade: 12, num: '0412971', courses: ['ENGL 1A'], days: ['2026-10-22T18:00:00Z', '2026-11-03T18:00:00Z'] },
   ];
   let mayaId = 0;
   for (const s of students) {
-    const id = user(s.f, s.l, s.e, 'student', enterprise, { grade: s.grade, gpa: s.gpa, num: s.num, counselor: alvarez });
+    const id = user(s.f, s.l, s.e, 'student', enterprise, { grade: s.grade, num: s.num, counselor: alvarez });
     if (s.f === 'Maya') {
       mayaId = id;
       // Maya has turned on sharing, so her parent sees everything; Jamie (below) hasn't.
@@ -352,7 +358,7 @@ function seed(d: DatabaseSync) {
   d.prepare('INSERT INTO parent_links (parent_id, student_id) VALUES (?,?)').run(laura, mayaId);
 
   // A not-yet-started student with no parent account yet: they invite one from step 03.
-  const jamie = user('Jamie', 'Lee', 'jamie.l@student.andersonhigh.org', 'student', anderson, { grade: 11, gpa: 3.3, num: '0413002' });
+  const jamie = user('Jamie', 'Lee', 'jamie.l@student.andersonhigh.org', 'student', anderson, { grade: 11, num: '0413002' });
   d.prepare('INSERT INTO enrollments (student_id, term_id, started_at, step_modes) VALUES (?,2,NULL,NULL)').run(jamie); // Summer 2027
 
   // Jordan's primary school is Enterprise HS.
@@ -368,7 +374,7 @@ function seed(d: DatabaseSync) {
   let n = 500;
   for (const x of done) {
     const sid = schoolIds[x.school];
-    const id = user(x.f, x.l, `${x.f.toLowerCase()}.${x.l[0].toLowerCase()}@student.example.org`, 'student', sid, { grade: 12, gpa: 3.5, num: `0413${n++}` });
+    const id = user(x.f, x.l, `${x.f.toLowerCase()}.${x.l[0].toLowerCase()}@student.example.org`, 'student', sid, { grade: 12, num: `0413${n++}` });
     const t0 = new Date(new Date(x.ready).getTime() - 20 * 864e5).toISOString();
     insEnroll.run(id, t0, modesFor(sid));
     insProg.run(id, 1, 'complete', t0, JSON.stringify({ confirmation: 'CCC-' + n }));
@@ -388,6 +394,19 @@ function seed(d: DatabaseSync) {
   const ava = (d.prepare("SELECT id FROM users WHERE email = 'ava.t@student.suhsd.net'").get() as { id: number }).id;
   d.prepare('INSERT INTO school_change_requests (student_id, from_school_id, to_school_id, note) VALUES (?,?,?,?)')
     .run(ava, enterprise, schoolIds['Shasta High School'], 'I transferred to Shasta High in October.');
+  // Some students picked Enterprise's Dual Enrollment sections (taught on campus) instead of the college's.
+  for (const [email, code] of [['maya.r@student.suhsd.net', 'ENGL 1A'], ['lucas.h@student.suhsd.net', 'ENGL 1A'], ['ethan.b@student.suhsd.net', 'HIST 17']]) {
+    d.prepare(`UPDATE course_requests SET course_id = (SELECT id FROM courses WHERE kind = 'de' AND school_id = ? AND code = ?)
+      WHERE student_id = (SELECT id FROM users WHERE email = ?) AND course_id = ?`).run(enterprise, code, email, courseIds[code]);
+  }
+
+  // Graduation years (2026–27 school year: seniors are the class of 2027), plus alumni to retire.
+  d.exec("UPDATE users SET grad_year = 2027 + (12 - grade) WHERE role = 'student' AND grade IS NOT NULL");
+  for (const [f, l, year] of [['Grace', 'Holt', 2022], ['Owen', 'Price', 2022], ['Lily', 'Shaw', 2023]] as [string, string, number][]) {
+    const id = user(f, l, `${f.toLowerCase()}.${l.toLowerCase()}@alumni.example.org`, 'student', enterprise, { counselor: alvarez });
+    d.prepare('UPDATE users SET grad_year = ? WHERE id = ?').run(year, id);
+    d.prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,1)').run(id);
+  }
   d.exec('COMMIT');
 }
 
@@ -414,6 +433,14 @@ export function cryptoToken() {
 function migrate(d: DatabaseSync) {
   const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+  if (!cols.includes('retired_at')) d.exec('ALTER TABLE users ADD COLUMN retired_at TEXT');
+  // GPA is no longer kept on student accounts.
+  if (cols.includes('gpa')) d.exec('UPDATE users SET gpa = NULL WHERE gpa IS NOT NULL');
+  if (!cols.includes('grad_year')) {
+    d.exec('ALTER TABLE users ADD COLUMN grad_year INTEGER');
+    // Best guess from grade, for the 2026–27 school year (seniors graduate in 2027).
+    d.exec("UPDATE users SET grad_year = 2027 + (12 - grade) WHERE role = 'student' AND grade IS NOT NULL");
+  }
   if (!cols.includes('share_with_parents')) {
     d.exec('ALTER TABLE users ADD COLUMN share_with_parents INTEGER NOT NULL DEFAULT 0');
   }

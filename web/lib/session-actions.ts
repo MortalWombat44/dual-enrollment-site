@@ -1,7 +1,7 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { db, tx } from './db';
-import { currentTerm } from './workflow';
+import { currentClassYear, currentTerm } from './workflow';
 import { createSession, destroySession, HOME, type Role } from './auth';
 import { hashPassword, verifyPassword } from './password';
 import { clearFailures, createResetToken, lockedMinutes, MAX_RESETS_PER_HOUR, recentResets, recordFailure, resetTokenUser, RESET_MINUTES, useResetTokens } from './security';
@@ -59,13 +59,16 @@ export async function signUp(formData: FormData) {
   const confirm = String(formData.get('confirm') || '');
   const schoolId = Number(formData.get('school'));
   const num = String(formData.get('student_number') || '').trim().slice(0, 20) || null;
-  const keep = new URLSearchParams({ first, last, email, school: String(schoolId || ''), id: num ?? '' });
+  const gradYear = Number(formData.get('grad_year'));
+  const keep = new URLSearchParams({ first, last, email, school: String(schoolId || ''), id: num ?? '', grad: String(gradYear || '') });
   const fail = (e: string) => redirect(`/signup?error=${e}&${keep}`);
   if (!first || !last) fail('name');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('email');
   if (password.length < 8 || password !== confirm) fail('password');
   if (!schoolId || !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) fail('school');
   if (num && !/^[A-Za-z0-9-]+$/.test(num)) fail('id');
+  const thisClass = currentClassYear();
+  if (!Number.isInteger(gradYear) || gradYear < thisClass || gradYear > thisClass + 5) fail('grad');
   if (db().prepare('SELECT 1 FROM users WHERE email = ?').get(email)) fail('exists');
   const id = tx(() => {
     const counselor = db()
@@ -73,8 +76,8 @@ export async function signUp(formData: FormData) {
       .get(schoolId) as { id: number } | undefined;
     // A Shasta College ID already on another account is allowed here; college admins see it flagged.
     const uid = Number(db()
-      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, password_hash, student_number, counselor_id) VALUES (?,?,?,'student',?,'active',?,?,?)")
-      .run(first, last, email, schoolId, hashPassword(password), num, counselor?.id ?? null).lastInsertRowid);
+      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, password_hash, student_number, counselor_id, grad_year) VALUES (?,?,?,'student',?,'active',?,?,?,?)")
+      .run(first, last, email, schoolId, hashPassword(password), num, counselor?.id ?? null, gradYear).lastInsertRowid);
     db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, currentTerm().id);
     return uid;
   });

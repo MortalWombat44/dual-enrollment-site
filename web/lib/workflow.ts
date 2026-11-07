@@ -335,3 +335,15 @@ export function courseWhen(c: Pick<Course, 'kind' | 'period' | 'teacher'>): stri
   return '';
 }
 export const KIND_LABEL = { de: 'Dual Enrollment', ce: 'Concurrent Enrollment' } as const;
+
+/** The graduating class of the current school year (school years end in June, Pacific time). */
+export function currentClassYear(now = new Date()): number {
+  const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' }).format(now).split('-').map(Number);
+  return m >= 7 ? y + 1 : y;
+}
+/** "Class of 2027 · Grade 12" (grade worked out from the graduation year). */
+export function classLabel(u: { grad_year: number | null; grade: number | null }): string {
+  if (!u.grad_year) return u.grade ? `Grade ${u.grade}` : 'Class not set';
+  const grade = 12 - (u.grad_year - currentClassYear());
+  return `Class of ${u.grad_year}` + (grade > 12 ? ' · Graduated' : grade >= 9 ? ` · Grade ${grade}` : '');
+}

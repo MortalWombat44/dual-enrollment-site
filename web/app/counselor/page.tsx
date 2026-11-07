@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
-import { nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
+import { classLabel, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
 import { approve, sendBack } from '@/lib/counselor-actions';
 import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
@@ -68,14 +68,14 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
             </form>
           </div>
           <table className="table" style={{ width: '100%' }}>
-            <thead><tr><th>Student</th><th>Grade</th><th>Courses</th><th>Steps</th><th>{tab === 'ready' ? 'Waiting' : tab === 'approved' ? 'Approved' : 'Next'}</th></tr></thead>
+            <thead><tr><th>Student</th><th>Class</th><th>Courses</th><th>Steps</th><th>{tab === 'ready' ? 'Waiting' : tab === 'approved' ? 'Approved' : 'Next'}</th></tr></thead>
             <tbody>
               {rows.map((p) => {
                 const link = href({ student: p.student.id });
                 return (
                   <tr key={p.student.id} className={sel?.student.id === p.student.id ? 'sel' : undefined}>
                     <td><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong></Link></td>
-                    <td><Link className="rowa" href={link}>{p.student.grade ?? '—'}</Link></td>
+                    <td><Link className="rowa" href={link}>{p.student.grad_year ?? p.student.grade ?? '—'}</Link></td>
                     <td><Link className="rowa" href={link}>{p.courses.map((c) => c.code).join(', ') || '—'}</Link></td>
                     <td><Link className="rowa" href={link}>{p.complete} / {p.total}</Link></td>
                     <td><Link className="rowa" href={link}>{tab === 'ready' ? daysSince(submittedAt(p)) : tab === 'approved' ? fmt(s4(p)?.completedAt) : p.next?.short ?? '—'}</Link></td>
@@ -111,7 +111,7 @@ function ReviewPanel({ p }: { p: StudentProgress | null }) {
       <div className="pad-sm" style={{ padding: '28px 32px', borderBottom: '2px solid var(--color-divider)' }}>
         <div className="kicker accent700">{canAct ? 'Reviewing' : s4?.status === 'complete' ? 'Approved' : 'In progress'}</div>
         <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}</div>
-        <div style={{ fontSize: 14, marginTop: 2 }}>Grade {p.student.grade ?? '—'} · GPA {p.student.gpa?.toFixed(1) ?? '—'} · ID {p.student.student_number ?? '—'}</div>
+        <div style={{ fontSize: 14, marginTop: 2 }}>{classLabel(p.student)} · ID {p.student.student_number ?? '—'}</div>
       </div>
       <div className="pad-sm" style={{ padding: '20px 32px', borderBottom: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {before.map((s) => (

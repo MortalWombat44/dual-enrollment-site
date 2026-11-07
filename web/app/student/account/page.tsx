@@ -1,7 +1,7 @@
 import { requireRole } from '@/lib/auth';
 import { sharesWithParents } from '@/lib/access';
 import { db } from '@/lib/db';
-import { fmt, getProgress, openSchoolChange } from '@/lib/workflow';
+import { classLabel, fmt, getProgress, openSchoolChange } from '@/lib/workflow';
 import { cancelSchoolChange, requestSchoolChange, setMyStudentNumber, setParentSharing } from '@/lib/student-actions';
 import { TopBar, Flash } from '@/components/chrome';
 import { ShareToggle } from '@/components/ShareToggle';
@@ -45,6 +45,7 @@ export default async function Account({ searchParams }: { searchParams: Promise<
           <div className="ink60" style={{ fontSize: 12 }}>Name</div>
           <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{me.first_name} {me.last_name}</div>
           <div style={{ fontSize: 13, marginTop: 2 }}>{me.email}</div>
+          <div style={{ fontSize: 13, marginTop: 2 }}>{classLabel(me)}</div>
         </div>
         <form action={setMyStudentNumber} className="pad-sm" style={{ padding: '24px 40px', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label htmlFor="sid" className="ink60" style={{ fontSize: 12 }}>Shasta College ID</label>

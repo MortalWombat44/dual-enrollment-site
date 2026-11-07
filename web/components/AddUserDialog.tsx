@@ -5,7 +5,7 @@ import { useState } from 'react';
 type School = { id: number; name: string; designation: string };
 type Term = { id: number; name: string };
 
-export function AddUserDialog({ action, schools, terms, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; terms: Term[]; error?: string }) {
+export function AddUserDialog({ action, schools, terms, gradYears, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; terms: Term[]; gradYears: number[]; error?: string }) {
   const [role, setRole] = useState('counselor');
   const [school, setSchool] = useState<number>(schools[0]?.id ?? 0);
   const [level, setLevel] = useState('college');
@@ -50,6 +50,14 @@ export function AddUserDialog({ action, schools, terms, error }: { action: (fd: 
                 <option value="admin">Admin</option>
                 <option value="teacher">Teacher</option>
                 <option value="other">Other</option>
+              </select>
+            </div>
+          )}
+          {role === 'student' && (
+            <div className="field">
+              <label htmlFor="grad_year">High school graduation year</label>
+              <select id="grad_year" name="grad_year" className="input" defaultValue={gradYears[1]}>
+                {gradYears.map((y) => <option key={y} value={y}>Class of {y}</option>)}
               </select>
             </div>
           )}

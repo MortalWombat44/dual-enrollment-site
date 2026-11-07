@@ -2,9 +2,11 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { addUser, adminResetLink, setUserDisabled, unlockUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
+import { addUser, retireGradClass, adminResetLink, setUserDisabled, unlockUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
 import { lockedEmails, RESET_MINUTES } from '@/lib/security';
-import { activeTerms } from '@/lib/workflow';
+import { retirableClasses } from '@/lib/retire';
+import { ConfirmButton } from '@/components/ConfirmButton';
+import { activeTerms, currentClassYear } from '@/lib/workflow';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
 import { AddUserDialog } from '@/components/AddUserDialog';
 import { Flash } from '@/components/chrome';
@@ -23,9 +25,9 @@ const ERRORS: Record<string, string> = {
 
 const STAFF_LABEL: Record<string, string> = { counselor: 'Counselor', admin: 'Admin', teacher: 'Teacher', other: 'Other' };
 
-type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; staff_type: string | null; disabled: number };
+type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; staff_type: string | null; disabled: number; retired_at: string | null };
 
-export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string; resetfor?: string; token?: string; unlocked?: string }> }) {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string; resetfor?: string; token?: string; unlocked?: string; retired?: string; rs?: string; rp?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
   const role = ROLE_TABS.some(([r]) => r === sp.role) ? sp.role! : '';
@@ -35,13 +37,14 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   if (role) { where.push('u.role = ?'); args.push(role); }
   if (q) { where.push("(u.first_name || ' ' || u.last_name LIKE ? OR u.email LIKE ?)"); args.push(`%${q}%`, `%${q}%`); }
   const rows = db().prepare(
-    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.staff_type, u.disabled, s.name AS school
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.staff_type, u.disabled, u.retired_at, s.name AS school
      FROM users u LEFT JOIN schools s ON s.id = u.school_id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY u.created_at DESC, u.id DESC LIMIT 200`).all(...args) as Row[];
   const total = (db().prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
   const invited = sp.invited ? (db().prepare("SELECT first_name, email, invite_token FROM users WHERE id = ? AND status = 'invited'").get(Number(sp.invited)) as { first_name: string; email: string; invite_token: string } | undefined) : undefined;
   const locked = lockedEmails();
+  const retirable = retirableClasses();
   const resetFor = sp.resetfor ? (db().prepare('SELECT first_name, last_name, email FROM users WHERE id = ?').get(Number(sp.resetfor)) as { first_name: string; last_name: string; email: string } | undefined) : undefined;
   const h = await headers();
   const origin = `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
@@ -67,6 +70,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
         </div>
       )}
       <Flash msg={sp.unlocked ? 'Account unlocked. They can try signing in again.' : null} />
+      <Flash msg={sp.retired ? `Retired the class of ${sp.retired}: ${sp.rs} student account${sp.rs === '1' ? '' : 's'} and ${sp.rp} parent account${sp.rp === '1' ? '' : 's'}. Their records are kept; use Enable to restore one.` : null} />
       {invited && (
         <div className="flash pad-sm" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span><strong>Invite created for {invited.first_name}.</strong> Send this link to {invited.email} so they can set a password:</span>
@@ -137,7 +141,8 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                 <td>{u.role === 'admin' ? 'Shasta College' : u.school ?? '—'}</td>
                 <td>
                   <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {u.disabled ? <span className="tag" style={{ background: '#fdecea', color: '#6b1a12' }}>Disabled</span>
+                    {u.retired_at ? <span className="tag tag-neutral">Retired</span>
+                      : u.disabled ? <span className="tag" style={{ background: '#fdecea', color: '#6b1a12' }}>Disabled</span>
                       : u.status === 'active' ? <span className="tag tag-accent">Active</span>
                       : <><span className="tag tag-neutral">Invited</span><Link href={`/admin/users?invited=${u.id}`} style={{ fontSize: 12 }}>Invite link</Link></>}
                     {locked.has(u.email.toLowerCase()) && (
@@ -169,7 +174,32 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           </tbody>
         </table>
       </div>
-      {sp.add && <AddUserDialog action={addUser} schools={schools} terms={activeTerms()} error={sp.error ? ERRORS[sp.error] : undefined} />}
+      <div id="retire" className="pad-sm" style={{ padding: '8px 40px 48px', display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>
+        <div className="kicker">Retire graduated classes</div>
+        <div style={{ fontSize: 14 }}>
+          Retiring switches off every student account in a graduated class (and parents whose students are all retired). Records are kept, and you can Enable an account again.
+        </div>
+        {retirable.length === 0 ? <div className="ink60" style={{ fontSize: 14 }}>No graduated classes with active accounts.</div> : (
+          <table className="table" style={{ width: '100%', maxWidth: 520 }}>
+            <thead><tr><th>Class of</th><th>Active student accounts</th><th /></tr></thead>
+            <tbody>
+              {retirable.map((c) => (
+                <tr key={c.grad_year}>
+                  <td><strong>{c.grad_year}</strong></td>
+                  <td>{c.n}</td>
+                  <td>
+                    <form>
+                      <input type="hidden" name="grad_year" value={c.grad_year} />
+                      <ConfirmButton formAction={retireGradClass} className="btn btn-secondary" message={`Retire all ${c.n} student account(s) in the class of ${c.grad_year}? They won't be able to sign in.`}>Retire class of {c.grad_year}</ConfirmButton>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {sp.add && <AddUserDialog action={addUser} schools={schools} terms={activeTerms()} gradYears={Array.from({ length: 5 }, (_, i) => currentClassYear() + i)} error={sp.error ? ERRORS[sp.error] : undefined} />}
     </AdminShell>
   );
 }

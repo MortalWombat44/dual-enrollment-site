@@ -42,6 +42,7 @@ Demo accounts (password `shasta2027`):
 | Concurrent Enrollment course list; links to each school's Dual Enrollment list (super admin) | `/admin/courses` |
 | Terms: several at once, registration dates, registration allowed on/off (super admin) | `/admin/terms` |
 | Admin reports (Clear units wait times and counts) | `/admin/reports` |
+| Roster by school, by class or by teacher (+ CSV) | `/admin/roster` |
 | Student sign-up (picks their high school) | `/signup` |
 
 ## Steps (in order)
@@ -77,6 +78,9 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 - **Course lists:** two kinds. **Dual Enrollment** (taught at the high school; code, title, units, period, teacher, prerequisite) is edited per school at the bottom of `/admin/schools/[id]`. **Concurrent Enrollment** (taught at Shasta College; just code, title and units, plus an optional prerequisite) is edited at `/admin/courses`. Students see their own school's Dual Enrollment sections plus every Concurrent course, in two labelled groups. Removing a course hides it from new requests; existing requests keep it. Seeded courses and teachers are placeholders.
 - **Sign-in lockout:** 5 wrong passwords within 15 minutes locks that email for 15 minutes (unknown emails are treated the same, so nobody can probe which emails exist). Super admins see **Locked** on the Users page and can **Unlock**. Settings are in `lib/security.ts`.
 - **Forgot password:** `/forgot` emails a one-time link (expires in 60 minutes, max 3 per hour). Resetting signs the account out everywhere. Email is sent through Resend when `RESEND_API_KEY` and `MAIL_FROM` are set in the environment; without them nothing is emailed, the link is printed in the server log, and test mode (`SHOW_DEMO_ACCOUNTS=1`) shows it on screen. Super admins can also make a **Reset link** for any user from Users. Passwords are stored only as salted scrypt hashes; reset tokens only as SHA-256 hashes.
+- **Roster** (`/admin/roster`, all admins): pick a school (primary schools first) and term; view **by class** (every Dual Enrollment section plus Concurrent classes the school's students picked) or **by teacher**, with each student's graduation year, term and the step they're on. Download as CSV.
+- **Graduation year:** students choose it at sign-up; admins can set it in the student panel and when adding a student. GPA is no longer kept.
+- **Retiring accounts:** Users → "Retire graduated classes" switches off every student in a graduated class (and parents whose students are all retired). Records are kept; Enable restores an account. Each June super admins see a reminder to retire the class from 4 years ago (dismissable for the year; `DE_TODAY=YYYY-MM-DD` overrides the date for testing).
 - **Seeded named accounts** (`ensureAccounts` in `lib/db.ts`) are created on every fresh database, only if missing.
 
 ## Workflow rules
