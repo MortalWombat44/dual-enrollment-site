@@ -165,3 +165,17 @@ export async function setGradYear(formData: FormData) {
   }
   redirect(back(formData, { done: 'grad_saved' }));
 }
+
+/** Answer a high school staff request to change a student's Shasta College ID. */
+export async function approveIdChange(formData: FormData) { return decideIdChange(formData, true); }
+export async function declineIdChange(formData: FormData) { return decideIdChange(formData, false); }
+async function decideIdChange(formData: FormData, approve: boolean) {
+  const { me, studentId } = await load(formData);
+  const req = db().prepare("SELECT id, new_number FROM id_change_requests WHERE student_id = ? AND status = 'open'").get(studentId) as { id: number; new_number: string } | undefined;
+  if (!req) redirect(back(formData));
+  tx(() => {
+    if (approve) db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(req!.new_number, studentId);
+    db().prepare('UPDATE id_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req!.id);
+  });
+  redirect(back(formData, { done: approve ? 'id_change_approved' : 'id_change_declined' }));
+}

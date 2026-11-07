@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openSchoolChange, sharedStudentIds, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -13,7 +13,7 @@ import { primarySchoolIds } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'units' | 'prereq' | 'school' | 'ids' | 'all';
+type Tab = 'units' | 'prereq' | 'school' | 'idreq' | 'ids' | 'all';
 type SP = { tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const DONE: Record<string, string> = {
@@ -30,6 +30,8 @@ const DONE: Record<string, string> = {
   school_change_declined: 'School change request declined.',
   id_saved: 'Shasta College ID saved.',
   grad_saved: 'Graduation year saved.',
+  id_change_approved: 'Shasta College ID changed.',
+  id_change_declined: 'ID change request declined.',
 };
 const ERR: Record<string, string> = {
   note: 'Add a note so the student knows what to change.',
@@ -58,10 +60,11 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     units: all.filter((p) => waitingOn(p, 7)),
     prereq: all.filter((p) => waitingOn(p, 8)),
     school: all.filter((p) => !!openSchoolChange(p.student.id)),
+    idreq: all.filter((p) => !!openIdChange(p.student.id)),
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
     all,
   };
-  const tab: Tab = (['prereq', 'school', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
+  const tab: Tab = (['prereq', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
@@ -120,6 +123,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
             <Link className="seg-opt" href={href({ tab: 'units' })} aria-current={tab === 'units'}>Clear units · {groups.units.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'prereq' })} aria-current={tab === 'prereq'}>Prerequisites · {groups.prereq.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'school' })} aria-current={tab === 'school'}>School changes · {groups.school.length}</Link>
+            <Link className="seg-opt" href={href({ tab: 'idreq' })} aria-current={tab === 'idreq'}>ID changes · {groups.idreq.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'ids' })} aria-current={tab === 'ids'}>Shared IDs · {groups.ids.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'all' })} aria-current={tab === 'all'}>All students · {groups.all.length}</Link>
           </div>
@@ -178,6 +182,7 @@ const section: React.CSSProperties = { padding: '20px 32px', borderBottom: '2px 
 
 function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress; me: User; schools: { id: number; name: string }[]; terms: Term[]; keep: Record<string, string>; sharedWith: { id: number; name: string }[] }) {
   const change = openSchoolChange(p.student.id);
+  const idChange = openIdChange(p.student.id);
   const units = p.courses.reduce((n, c) => n + c.units, 0);
   const s7 = p.steps.find((s) => s.id === 7);
   const s8 = p.steps.find((s) => s.id === 8);
@@ -200,6 +205,21 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <div style={{ display: 'flex', gap: 8 }}>
             <button formAction={approveSchoolChange} className="btn btn-primary" style={{ flex: 1, justifyContent: 'space-between' }}>Move to {change.to_name.replace(' High School', ' HS')} <span>→</span></button>
             <button formAction={declineSchoolChange} className="btn btn-secondary">Decline</button>
+          </div>
+        </form>
+      )}
+
+      {idChange && (
+        <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
+          <Hidden p={p} keep={keep} />
+          <div className="kicker accent700">Shasta College ID change requested</div>
+          <div style={{ fontSize: 14 }}>
+            {idChange.by_name} (high school staff) asked to change the ID from <strong>{idChange.current_number ?? 'none'}</strong> to <strong>{idChange.new_number}</strong>.
+            {idChange.note && <> “{idChange.note}”</>}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button formAction={approveIdChange} className="btn btn-primary" style={{ flex: 1, justifyContent: 'space-between' }}>Change ID to {idChange.new_number} <span>→</span></button>
+            <button formAction={declineIdChange} className="btn btn-secondary">Decline</button>
           </div>
         </form>
       )}
@@ -328,6 +348,9 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </div>
       </form>
 
+      {me.admin_level === 'super' && (
+        <div className="pad-sm" style={{ padding: '16px 32px 0', fontSize: 14 }}><a href={`/admin/audit.pdf?student=${p.student.id}`}>Download audit PDF (consent + course requests)</a></div>
+      )}
       {consent?.status === 'complete' && (
         <div className="pad-sm" style={{ padding: '16px 32px', fontSize: 14 }}><a href={`/consent/${p.student.id}`} target="_blank" rel="noreferrer">View parent consent</a></div>
       )}

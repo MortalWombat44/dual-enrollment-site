@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS users (
   disabled INTEGER NOT NULL DEFAULT 0, -- super admins can switch off access
   retired_at TEXT, -- set when retired by graduation year (also disabled)
   grad_year INTEGER, -- students: high school graduation year
+  signature_file_id INTEGER, -- high school staff: saved signature used for "Approve & sign digitally"
   grade_confirmed_year INTEGER, -- the school year (by its June) the student last confirmed grade + grad year
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -147,6 +148,18 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS id_change_requests (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  requested_by INTEGER NOT NULL REFERENCES users(id),
+  current_number TEXT,
+  new_number TEXT NOT NULL,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','approved','declined')),
+  created_at TEXT NOT NULL,
+  handled_by INTEGER REFERENCES users(id),
+  handled_at TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -436,6 +449,7 @@ function migrate(d: DatabaseSync) {
   const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('retired_at')) d.exec('ALTER TABLE users ADD COLUMN retired_at TEXT');
+  if (!cols.includes('signature_file_id')) d.exec('ALTER TABLE users ADD COLUMN signature_file_id INTEGER');
   if (!cols.includes('grade_confirmed_year')) {
     d.exec('ALTER TABLE users ADD COLUMN grade_confirmed_year INTEGER');
     // Students already here count as confirmed for this school year; they're asked again next July.

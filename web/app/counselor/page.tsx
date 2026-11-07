@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
-import { classLabel, isYoung, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
-import { approve, sendBack } from '@/lib/counselor-actions';
+import { classLabel, currentGrade, GRADES, isYoung, openIdChange, ordinal, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
+import { approve, requestIdChange, sendBack, staffSetGrade } from '@/lib/counselor-actions';
 import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
+import { ApproveSignForm } from '@/components/ApproveSignForm';
+import type { User } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,13 +42,14 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
     const s = u.toString();
     return '/counselor' + (s ? '?' + s : '');
   };
-  const flash = sp.done === 'approved' ? `Approved ${sp.name}'s courses. Shasta College clears their units next.` : sp.done === 'changes' ? `Sent ${sp.name}'s plan back with your note.` : null;
+  const flash = sp.done === 'approved' ? `Approved ${sp.name}'s courses. Shasta College clears their units next.` : sp.done === 'changes' ? `Sent ${sp.name}'s plan back with your note.`
+    : sp.done === 'grade' ? 'Grade and graduation year saved.' : sp.done === 'id_request' ? 'ID change request sent to Shasta College.' : null;
 
   return (
     <div className="frame">
       <TopBar user={me} nav={[{ href: '/counselor', label: 'Review queue' }]} current="/counselor" right={<span className="tag tag-neutral">Counselor · {school?.name.replace('High School', 'HS') ?? '—'}</span>} />
       <Flash msg={flash} />
-      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows what to change.' : null} error />
+      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows what to change.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : null} error />
       {counselorOff && <Flash msg={`High school approval is turned off for ${school?.name}. New students skip this step.`} />}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label="Waiting on you" value={String(groups.ready.length)} hero />
@@ -86,7 +89,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
             </tbody>
           </table>
         </div>
-        <ReviewPanel p={sel} />
+        <ReviewPanel p={sel} me={me} />
       </div>
     </div>
   );
@@ -101,7 +104,7 @@ function Stat({ label, value, hero, last }: { label: string; value: string; hero
   );
 }
 
-function ReviewPanel({ p }: { p: StudentProgress | null }) {
+function ReviewPanel({ p, me }: { p: StudentProgress | null; me: User }) {
   if (!p) return <div className="pad-sm ink60" style={{ padding: '28px 32px', fontSize: 14 }}>Pick a student to see their plan.</div>;
   const s4 = p.steps.find((s) => s.id === 4);
   const canAct = s4?.status === 'in_review';
@@ -130,20 +133,58 @@ function ReviewPanel({ p }: { p: StudentProgress | null }) {
         {p.courses.length ? <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact /> : <div className="ink60" style={{ fontSize: 14, marginTop: 6 }}>None yet</div>}
       </div>
       {canAct ? (
-        <form style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-          <input type="hidden" name="studentId" value={p.student.id} />
-          <div className="field pad-sm" style={{ padding: '20px 32px' }}>
-            <label htmlFor="note">Note to student (optional for approval, required for changes)</label>
-            <textarea id="note" name="note" className="input" maxLength={1000} style={{ minHeight: 72, resize: 'none' }} />
-          </div>
-          <div className="pad-sm" style={{ marginTop: 'auto', padding: '20px 32px 28px', display: 'flex', flexDirection: 'column', gap: 8, borderTop: '2px solid var(--color-text)' }}>
-            <button formAction={approve} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Approve courses <span>→</span></button>
-            <button formAction={sendBack} className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Request changes</button>
-          </div>
-        </form>
+        <ApproveSignForm
+          studentId={p.student.id}
+          staffName={`${me.first_name} ${me.last_name}`}
+          savedUrl={me.signature_file_id ? `/files/${me.signature_file_id}` : null}
+          approve={approve}
+          sendBack={sendBack}
+        />
       ) : s4?.status === 'complete' && s4.data?.note ? (
         <div className="pad-sm" style={{ padding: '20px 32px', fontSize: 14 }}>Your note: “{String(s4.data.note)}”</div>
       ) : null}
+      <StudentRecord p={p} />
     </div>
+  );
+}
+
+/** High school staff can update grade + graduation year, and ask Shasta College to change a student's ID. */
+function StudentRecord({ p }: { p: StudentProgress }) {
+  const pending = openIdChange(p.student.id);
+  const box: React.CSSProperties = { padding: '20px 32px', borderTop: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10 };
+  return (
+    <>
+      <form action={staffSetGrade} className="pad-sm" style={box}>
+        <input type="hidden" name="studentId" value={p.student.id} />
+        <div className="kicker">Grade and graduation year</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <select name="grade" className="input" defaultValue={currentGrade(p.student) ?? ''} required aria-label="Grade" style={{ width: 140 }}>
+            <option value="" disabled>Grade…</option>
+            {GRADES.map((g) => <option key={g} value={g}>{ordinal(g)} grade</option>)}
+          </select>
+          <input name="grad_year" type="number" min={2000} max={2100} className="input" defaultValue={p.student.grad_year ?? ''} required aria-label="Graduation year" style={{ width: 110 }} />
+          <button className="btn btn-secondary">Save</button>
+        </div>
+      </form>
+      <form action={requestIdChange} className="pad-sm" style={box}>
+        <input type="hidden" name="studentId" value={p.student.id} />
+        <div className="kicker">Shasta College ID</div>
+        <div style={{ fontSize: 14 }}>Current: <strong>{p.student.student_number ?? 'not added yet'}</strong></div>
+        {pending ? (
+          <div style={{ fontSize: 14, background: 'var(--color-accent-100)', padding: '8px 12px' }}>
+            Change to <strong>{pending.new_number}</strong> requested by {pending.by_name}. Waiting for Shasta College to approve it.
+          </div>
+        ) : (
+          <details>
+            <summary style={{ cursor: 'pointer', fontSize: 14, color: 'var(--color-accent-700)' }}>Request a Shasta College ID change</summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              <input name="new_number" className="input" required placeholder="Correct Shasta College ID" aria-label="New Shasta College ID" />
+              <input name="note" className="input" placeholder="Why? (optional)" aria-label="Reason" />
+              <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Send request to Shasta College</button>
+            </div>
+          </details>
+        )}
+      </form>
+    </>
   );
 }

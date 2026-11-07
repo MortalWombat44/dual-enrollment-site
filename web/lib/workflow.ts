@@ -238,7 +238,8 @@ export function requestChanges(studentId: number, stepId: number, by: User, note
  * Parent consent is one-time and covers future terms, so it is only removed when that step itself is reopened.
  */
 export function reopenFrom(studentId: number, stepId: number) {
-  const later = STEP_ORDER.slice(STEP_ORDER.indexOf(stepId)).filter((id) => id !== 3 || stepId === 3);
+  // CCCApply (1) and parent consent (3) are once-ever, so they're only removed when that step itself is reopened.
+  const later = STEP_ORDER.slice(STEP_ORDER.indexOf(stepId)).filter((id) => (id !== 3 && id !== 1) || stepId === id);
   const d = db();
   tx(() => {
     const del = d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = ?');
@@ -364,4 +365,11 @@ export function classLabel(u: GradeInfo): string {
   const grade = g === null ? '' : g > 12 ? 'Graduated' : g < 1 ? '' : `${ordinal(g)} grade`;
   if (!u.grad_year) return grade || 'Class not set';
   return `Class of ${u.grad_year}` + (grade ? ` · ${grade}` : '');
+}
+
+/** An open request (from high school staff) to change a student's Shasta College ID. */
+export function openIdChange(studentId: number) {
+  return (db().prepare(`SELECT r.id, r.current_number, r.new_number, r.note, r.created_at, u.first_name || ' ' || u.last_name AS by_name
+    FROM id_change_requests r JOIN users u ON u.id = r.requested_by WHERE r.student_id = ? AND r.status = 'open'`).get(studentId) as
+    { id: number; current_number: string | null; new_number: string; note: string | null; created_at: string; by_name: string } | undefined) ?? null;
 }

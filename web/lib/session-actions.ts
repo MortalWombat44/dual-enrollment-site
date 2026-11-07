@@ -28,6 +28,12 @@ export async function login(formData: FormData) {
   if (u!.disabled) back('error=disabled');
   clearFailures(email);
   await createSession(u!.id);
+  // Students who skipped their Shasta College ID on step 01 come back to it at every sign-in until it's added.
+  if (u!.role === 'student') {
+    const pending = db().prepare(`SELECT 1 FROM users u JOIN step_progress p ON p.student_id = u.id AND p.step_id = 1 AND p.status = 'complete'
+      WHERE u.id = ? AND (u.student_number IS NULL OR u.student_number = '')`).get(u!.id);
+    if (pending) redirect('/student/steps/1');
+  }
   redirect(HOME[u!.role]);
 }
 

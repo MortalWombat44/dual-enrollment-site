@@ -43,6 +43,7 @@ Demo accounts (password `shasta2027`):
 | Terms: several at once, registration dates, registration allowed on/off (super admin) | `/admin/terms` |
 | Admin reports (Clear units wait times and counts) | `/admin/reports` |
 | Roster by school, by class or by teacher (+ CSV) | `/admin/roster` |
+| Audit PDFs: consent + course requests by Shasta College ID and term (super admin) | `/admin/audit` |
 | Student sign-up (picks their high school) | `/signup` |
 
 ## Steps (in order)
@@ -81,6 +82,10 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 - **Roster** (`/admin/roster`, all admins): pick a school (primary schools first) and term; view **by class** (every Dual Enrollment section plus Concurrent classes the school's students picked) or **by teacher**, with each student's graduation year, term and the step they're on. Download as CSV.
 - **Graduation year:** students choose it at sign-up; admins can set it in the student panel and when adding a student. GPA is no longer kept.
 - **Yearly grade check:** students give their grade (1st–12th) and graduation year at sign-up. After July 1 each year, their first sign-in goes to `/confirm-grade` until they confirm both again. Students in 8th grade or below are tagged **Young student** (admin lists, counselor queue, roster) until they report 9th grade. Admins can set grade and graduation year in the student panel.
+- **Step 01 (CCCApply) is once-ever** and asks for the Shasta College ID. Students can tick "I don't have my Shasta College ID yet" to skip; they're then sent back to step 01 at every sign-in (and see a reminder) until the ID is added. Reopening earlier steps never resets step 01 or parent consent.
+- **High School Staff** can update a student's grade and graduation year and **request** a Shasta College ID change; college admins approve or decline it from the **ID changes** tab.
+- **Approve & sign digitally:** High school approval needs the staff member's signature: their saved one, drawn (finger, stylus or mouse), or typed and shown in a cursive script. They can save it for next time. Each approval keeps its signature image.
+- **Audit (super admins, `/admin/audit`):** paste Shasta College IDs, pick terms, and download one PDF with each student's parent consent (drawn signature, or the uploaded form attached) and course requests for those terms, plus approvals, including the high school staff signature where the school requires high school approval. A single student's PDF is also linked from their admin panel. Built with pdf-lib.
 - **Retiring accounts:** Users → "Retire graduated classes" switches off every student in a graduated class (and parents whose students are all retired). Records are kept; Enable restores an account. Each June super admins see a reminder to retire the class from 4 years ago (dismissable for the year; `DE_TODAY=YYYY-MM-DD` overrides the date for testing).
 - **Seeded named accounts** (`ensureAccounts` in `lib/db.ts`) are created on every fresh database, only if missing.
 

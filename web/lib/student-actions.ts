@@ -13,12 +13,29 @@ async function stepFor(stepId: number, allowed: string[]) {
   return { me, p, s };
 }
 
+/**
+ * Step 01 (done once ever): the student gives their Shasta College ID, or skips for now.
+ * Skipping completes the step so they can keep going, but they're sent back here at every sign-in until the ID is in.
+ */
 export async function submitCccapply(formData: FormData) {
   const { me } = await stepFor(1, ['current']);
-  const conf = String(formData.get('confirmation') || '').trim();
-  if (!/^[A-Za-z0-9-]{4,40}$/.test(conf)) redirect('/student/steps/1?error=confirmation');
-  completeStep(me.id, 1, { confirmation: conf });
+  const skip = formData.get('skip') === 'on';
+  const num = String(formData.get('student_number') || '').trim().slice(0, 20);
+  if (!skip) {
+    if (!/^[A-Za-z0-9-]{4,20}$/.test(num)) redirect('/student/steps/1?error=id');
+    db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
+  }
+  completeStep(me.id, 1, skip ? { id_pending: true } : { student_number: num });
   redirect('/student/steps/1/complete');
+}
+
+/** Adding the ID later, after skipping. */
+export async function addStudentId(formData: FormData) {
+  const me = await requireRole('student');
+  const num = String(formData.get('student_number') || '').trim().slice(0, 20);
+  if (!/^[A-Za-z0-9-]{4,20}$/.test(num)) redirect('/student/steps/1?error=id');
+  db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
+  redirect('/student?id_added=1');
 }
 
 export async function submitCourses(formData: FormData) {

@@ -4,7 +4,8 @@ import { requireRole } from '@/lib/auth';
 import { activeTerms, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
-import { submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { addStudentId, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { StudentIdForm } from '@/components/StudentIdForm';
 import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
 import { PacketTable } from '@/components/PacketTable';
@@ -14,7 +15,7 @@ import { logout } from '@/lib/session-actions';
 export const dynamic = 'force-dynamic';
 
 const ERRORS: Record<string, string> = {
-  confirmation: 'Enter the confirmation number from your CCCApply email (letters, numbers and dashes).',
+  id: 'Enter your Shasta College ID (letters, numbers and dashes), or check the box to skip for now.',
   none: 'Pick at least one course.',
   term: 'Pick an open term for every class.',
 };
@@ -135,13 +136,20 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
   } else {
     cells = [
       ['Completed on', fmt(s.completedAt, 'mdy'), fmt(s.completedAt, 'time')],
-      [s.id === 1 ? 'Confirmation' : s.id === 2 ? 'Courses' : 'Term', s.id === 1 ? String(d.confirmation ?? '') : s.id === 2 ? p.courses.map((c) => c.code).join(', ') : p.termLabel, s.id === 2 ? `${units} units` : ''],
+      [s.id === 1 ? 'Shasta College ID' : s.id === 2 ? 'Courses' : 'Term', s.id === 1 ? (p.student.student_number ?? 'Not added yet') : s.id === 2 ? p.courses.map((c) => c.code).join(', ') : p.termLabel, s.id === 2 ? `${units} units` : ''],
       ['School', p.school.name, p.school.designation === 'CCAP' ? 'CCAP partner' : 'Special admit'],
     ];
   }
   return (
     <>
       <Hero num={s.num} filled tag={<span className="tag tag-accent">Step complete</span>} title={copy.title} body={copy.body} />
+      {s.id === 1 && !p.student.student_number && (
+        <div className="pad-sm" style={{ padding: '24px 48px', borderBottom: '2px solid var(--color-divider)', background: '#fff4e0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, color: '#8a4b00' }}>Add your Shasta College ID</div>
+          <div style={{ fontSize: 14, color: '#8a4b00' }}>You skipped this earlier. You'll keep coming back here each time you sign in until it's added.</div>
+          <StudentIdForm action={addStudentId} initial="" allowSkip={false} submitLabel="Save my ID" />
+        </div>
+      )}
       <Cells cells={cells} />
       <div className="pad-sm" style={{ padding: '32px 48px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <h4 style={{ margin: 0, fontSize: 15 }}>Included in your packet</h4>
@@ -175,15 +183,15 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
       {error && <div className="flash flash-err pad-sm" style={{ padding: '12px 48px' }}>{error}</div>}
       <div className="pad-sm" style={{ padding: '32px 48px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 820 }}>
         {s.id === 1 && s.status === 'current' && (
-          <form action={submitCccapply} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ol style={{ margin: 0, paddingLeft: 20, fontSize: 15, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <li>Go to <a href="https://www.cccapply.org" target="_blank" rel="noreferrer">CCCApply</a> and pick Shasta College.</li>
-              <li>Choose <strong>{p.termLabel}</strong> and “Dual enrollment / special admit” as your enrollment status.</li>
-              <li>Copy the confirmation number from the email CCCApply sends you.</li>
+              <li>Choose “Dual enrollment / special admit” as your enrollment status.</li>
+              <li>Shasta College emails you your student ID. Enter it below.</li>
             </ol>
-            <div className="field" style={{ maxWidth: 360 }}><label htmlFor="conf">CCCApply confirmation number</label><input id="conf" name="confirmation" className="input" required placeholder="e.g. 18234567" /></div>
-            <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Mark step complete <span>→</span></button></div>
-          </form>
+            <div className="ink60" style={{ fontSize: 13 }}>You only do this step once. It carries over to future terms.</div>
+            <StudentIdForm action={submitCccapply} initial={p.student.student_number ?? ''} allowSkip submitLabel="Save my ID" />
+          </div>
         )}
         {s.id === 2 && (s.status === 'current' || s.status === 'changes') && (
           <form action={submitCourses} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

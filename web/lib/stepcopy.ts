@@ -70,7 +70,7 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
   const codes = p.courses.map((c) => c.code);
   const list = codes.length > 1 ? codes.slice(0, -1).join(', ') + ' and ' + codes.at(-1) : codes[0] ?? 'your courses';
   switch (s.id) {
-    case 1: return 'Apply to Shasta College on CCCApply, then enter your confirmation number here.';
+    case 1: return 'Apply to Shasta College on CCCApply, then enter your Shasta College ID here.';
     case 2: return s.status === 'changes' ? `${p.changeBy === 'college' ? 'Shasta College' : counselor} asked for changes to your course plan.` : "Pick the Shasta College sections offered for your school.";
     case 3:
       if (!p.parents.length) return 'Invite your parent or guardian. They make an account and sign online or upload a signed form.';
@@ -93,7 +93,7 @@ export function completionCopy(p: StudentProgress, s: StudentStep): { title: str
   const after = (id: number) => p.steps[p.steps.findIndex((x) => x.id === id) + 1];
   const reg = `Registration opens ${fmt(p.term.registration_opens)} at ${fmt(p.term.registration_opens, 'time')}.`;
   switch (s.id) {
-    case 1: return { title: 'Your application\nis in.', poster: 'Your Shasta College application is in.', body: `CCCApply confirmation ${String(s.data?.confirmation ?? '')}. Next, pick your courses.` };
+    case 1: return { title: 'Your application\nis in.', poster: 'Your Shasta College application is in.', body: p.student.student_number ? `Your Shasta College ID is ${p.student.student_number}. Next, pick your courses.` : "Add your Shasta College ID as soon as you get it. You'll be brought back here until you do. Next, pick your courses." };
     case 2: return { title: 'Your courses\nare picked.', poster: 'Your courses are picked.', body: `You requested ${list}. Your parent or guardian signs the consent form next.` };
     case 3: return { title: 'Parent consent\nis signed.', poster: 'Parent consent is signed.', body: 'It covers future terms too, so you only need it once. ' + (after(3)?.id === 4 ? "We've sent your packet to your high school counselor. You'll see it here when it's approved." : after(3)?.id === 7 ? "We've sent your packet to Shasta College to clear your units. You'll see it here when it's done." : `Your packet is complete. ${reg}`) };
     case 7: return { title: 'Your units\nare cleared.', poster: 'Shasta College cleared your units.', body: `Shasta College cleared ${list}. ${after(7)?.id === 8 ? 'A college counselor checks prerequisites next.' : reg}` };

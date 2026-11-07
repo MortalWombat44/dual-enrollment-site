@@ -8,7 +8,8 @@ import { STUDENT_NAV } from './nav';
 
 export const dynamic = 'force-dynamic';
 
-export default async function StudentDashboard() {
+export default async function StudentDashboard({ searchParams }: { searchParams: Promise<{ id_added?: string }> }) {
+  const sp = await searchParams;
   const me = await requireRole('student');
   const p = getProgress(me.id);
   if (!p) return <NoSchool />;
@@ -21,6 +22,12 @@ export default async function StudentDashboard() {
   return (
     <div className="frame">
       <TopBar nav={STUDENT_NAV} current="/student" user={me} right={<span className="tag tag-neutral hide-sm">Student</span>} />
+      {sp.id_added && <div className="flash">Thanks. Your Shasta College ID is saved.</div>}
+      {p.steps.find((x) => x.id === 1)?.status === 'complete' && !p.student.student_number && (
+        <Link href="/student/steps/1" className="flash unlink" style={{ display: 'block', background: '#fff4e0', color: '#8a4b00', borderBottomColor: '#d08a00' }}>
+          <strong>Add your Shasta College ID.</strong> You skipped it on step 01. Add it as soon as Shasta College emails it to you →
+        </Link>
+      )}
       {unseen.map((s) => (
         <Link key={s.id} href={`/student/steps/${s.id}/complete`} className="flash unlink" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span><strong>Step {pad(s.num)} complete.</strong> {completionCopy(p, s).poster}</span><span>See details →</span>
