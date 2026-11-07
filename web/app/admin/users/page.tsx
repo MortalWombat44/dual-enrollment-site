@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { addUser, setUserDisabled, updateAdmin, updateStaffType } from '@/lib/admin-actions';
+import { addUser, adminResetLink, setUserDisabled, unlockUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
+import { lockedEmails, RESET_MINUTES } from '@/lib/security';
 import { activeTerms } from '@/lib/workflow';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
 import { AddUserDialog } from '@/components/AddUserDialog';
@@ -24,7 +25,7 @@ const STAFF_LABEL: Record<string, string> = { counselor: 'Counselor', admin: 'Ad
 
 type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; staff_type: string | null; disabled: number };
 
-export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string }> }) {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string; resetfor?: string; token?: string; unlocked?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
   const role = ROLE_TABS.some(([r]) => r === sp.role) ? sp.role! : '';
@@ -40,6 +41,8 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
      ORDER BY u.created_at DESC, u.id DESC LIMIT 200`).all(...args) as Row[];
   const total = (db().prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
   const invited = sp.invited ? (db().prepare("SELECT first_name, email, invite_token FROM users WHERE id = ? AND status = 'invited'").get(Number(sp.invited)) as { first_name: string; email: string; invite_token: string } | undefined) : undefined;
+  const locked = lockedEmails();
+  const resetFor = sp.resetfor ? (db().prepare('SELECT first_name, last_name, email FROM users WHERE id = ?').get(Number(sp.resetfor)) as { first_name: string; last_name: string; email: string } | undefined) : undefined;
   const h = await headers();
   const origin = `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
   const tabHref = (r: string) => '/admin/users' + (r || q ? '?' + new URLSearchParams({ ...(r ? { role: r } : {}), ...(q ? { q } : {}) }) : '');
@@ -57,6 +60,13 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
       <AdminHead title="Users" action={<Link href="/admin/users?add=1" className="btn btn-primary btn-wide">Add user <span>+</span></Link>} />
       <Flash msg={sp.updated ? 'Saved.' : sp.disabled ? 'Account disabled. They have been signed out and cannot sign in.' : sp.enabled ? 'Account enabled. They can sign in again.' : null} />
       <Flash error msg={!sp.add && sp.error ? ERRORS[sp.error] : null} />
+      {resetFor && sp.token && (
+        <div className="flash pad-sm" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span><strong>Password reset link for {resetFor.first_name} {resetFor.last_name}.</strong> Send it to {resetFor.email}. It works once and expires in {RESET_MINUTES} minutes:</span>
+          <code style={{ wordBreak: 'break-all', fontSize: 13 }}>{origin}/reset/{sp.token}</code>
+        </div>
+      )}
+      <Flash msg={sp.unlocked ? 'Account unlocked. They can try signing in again.' : null} />
       {invited && (
         <div className="flash pad-sm" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span><strong>Invite created for {invited.first_name}.</strong> Send this link to {invited.email} so they can set a password:</span>
@@ -130,6 +140,19 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                     {u.disabled ? <span className="tag" style={{ background: '#fdecea', color: '#6b1a12' }}>Disabled</span>
                       : u.status === 'active' ? <span className="tag tag-accent">Active</span>
                       : <><span className="tag tag-neutral">Invited</span><Link href={`/admin/users?invited=${u.id}`} style={{ fontSize: 12 }}>Invite link</Link></>}
+                    {locked.has(u.email.toLowerCase()) && (
+                      <form action={unlockUser} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                        <input type="hidden" name="email" value={u.email} />
+                        <span className="tag" style={{ background: '#fff4e0', color: '#8a4b00' }}>Locked</span>
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 4px', color: 'var(--color-accent-700)' }}>Unlock</button>
+                      </form>
+                    )}
+                    {u.status === 'active' && !u.disabled && (
+                      <form action={adminResetLink}>
+                        <input type="hidden" name="id" value={u.id} />
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 4px', color: 'var(--color-accent-700)' }}>Reset link</button>
+                      </form>
+                    )}
                     {u.id !== me.id && (
                       <form action={setUserDisabled}>
                         <input type="hidden" name="id" value={u.id} />

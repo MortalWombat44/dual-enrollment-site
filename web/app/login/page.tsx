@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { currentUser, HOME } from '@/lib/auth';
 import { login } from '@/lib/session-actions';
+import { LOCK_MINUTES, MAX_FAILED } from '@/lib/security';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,7 @@ const DEMO = [
   ['College admin + college counselor', 'jkim@shastacollege.edu'],
 ];
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; email?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; email?: string; mins?: string; reset?: string }> }) {
   const u = await currentUser();
   if (u) redirect(HOME[u.role]);
   const sp = await searchParams;
@@ -37,11 +38,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <div className="kicker accent700">Sign in</div>
             <h1 style={{ fontSize: 44, lineHeight: 1.05, margin: '10px 0 0', letterSpacing: '-0.02em' }}>Welcome back.</h1>
           </div>
+          {sp.reset && <div className="flash" style={{ padding: '12px 16px' }}>Your password was changed. Sign in with your new password.</div>}
           {sp.error && (
             <div className="flash flash-err" style={{ padding: '12px 16px' }}>
               {sp.error === 'invite' ? 'That invite link has already been used or is no longer valid.'
                 : sp.error === 'disabled' ? 'This account has been disabled. Contact Shasta College Outreach if you think this is a mistake.'
-                : "That email and password don't match an active account."}
+                : sp.error === 'locked' ? <>Too many wrong passwords. This account is locked for {sp.mins ?? 15} more minute{sp.mins === '1' ? '' : 's'}. Try again then, or <a href="/forgot">reset your password</a>.</>
+                : <>That email and password don't match an active account. After {MAX_FAILED} wrong tries the account locks for {LOCK_MINUTES} minutes.</>}
             </div>
           )}
           <form action={login} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -51,7 +54,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Sign in <span>→</span></button>
             </div>
           </form>
-          <div style={{ fontSize: 15 }}>New student? <a href="/signup">Create your account</a></div>
+          <div style={{ fontSize: 15, display: 'flex', gap: 20, flexWrap: 'wrap' }}><a href="/forgot">Forgot password?</a><span>New student? <a href="/signup">Create your account</a></span></div>
           {(process.env.NODE_ENV !== 'production' || process.env.SHOW_DEMO_ACCOUNTS === '1') && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <div className="kicker-sm" style={{ paddingBottom: 8, borderBottom: '2px solid var(--color-text)' }}>Demo accounts · password shasta2027</div>

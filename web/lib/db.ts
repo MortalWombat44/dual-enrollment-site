@@ -132,6 +132,19 @@ CREATE TABLE IF NOT EXISTS school_change_requests (
   handled_by INTEGER REFERENCES users(id),
   handled_at TEXT
 );
+CREATE TABLE IF NOT EXISTS login_attempts (
+  email TEXT PRIMARY KEY COLLATE NOCASE,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  first_failed_at TEXT,
+  locked_until TEXT
+);
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash TEXT PRIMARY KEY, -- only a SHA-256 of the emailed token is stored
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

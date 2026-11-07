@@ -4,6 +4,9 @@ import { db, tx } from './db';
 import { currentTerm } from './workflow';
 import { createSession, destroySession, HOME, type Role } from './auth';
 import { hashPassword, verifyPassword } from './password';
+import { clearFailures, createResetToken, lockedMinutes, MAX_RESETS_PER_HOUR, recentResets, recordFailure, resetTokenUser, RESET_MINUTES, useResetTokens } from './security';
+import { demoMode, sendMail } from './mail';
+import { headers } from 'next/headers';
 
 export async function login(formData: FormData) {
   const email = String(formData.get('email') || '').trim();
@@ -11,12 +14,21 @@ export async function login(formData: FormData) {
   const u = db().prepare("SELECT id, role, password_hash, status, disabled FROM users WHERE email = ?").get(email) as
     | { id: number; role: Role; password_hash: string | null; status: string; disabled: number }
     | undefined;
-  if (u?.disabled && verifyPassword(password, u.password_hash)) redirect('/login?error=disabled&email=' + encodeURIComponent(email));
-  if (!u || u.status !== 'active' || !verifyPassword(password, u.password_hash)) {
-    redirect('/login?error=1&email=' + encodeURIComponent(email));
+  const back = (q: string) => redirect(`/login?${q}&email=${encodeURIComponent(email)}`);
+  // Locked after too many wrong passwords: don't even check the password.
+  const locked = lockedMinutes(email);
+  if (locked) back(`error=locked&mins=${locked}`);
+  const ok = !!u && verifyPassword(password, u.password_hash);
+  if (!ok || !u || u.status !== 'active') {
+    // Count failures for unknown emails too, so the response doesn't reveal which emails exist.
+    const nowLocked = recordFailure(email);
+    if (nowLocked) back(`error=locked&mins=${nowLocked}`);
+    back('error=1');
   }
-  await createSession(u.id);
-  redirect(HOME[u.role]);
+  if (u!.disabled) back('error=disabled');
+  clearFailures(email);
+  await createSession(u!.id);
+  redirect(HOME[u!.role]);
 }
 
 export async function logout() {
@@ -68,4 +80,48 @@ export async function signUp(formData: FormData) {
   });
   await createSession(id);
   redirect('/student');
+}
+
+async function origin() {
+  const h = await headers();
+  return `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
+}
+
+/** Forgot password: email a one-time link. Always answers the same way, so it never reveals which emails have accounts. */
+export async function requestPasswordReset(formData: FormData) {
+  const email = String(formData.get('email') || '').trim().toLowerCase().slice(0, 200);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) redirect('/forgot?error=email');
+  const u = db().prepare("SELECT id, first_name FROM users WHERE email = ? AND status = 'active' AND disabled = 0").get(email) as
+    | { id: number; first_name: string } | undefined;
+  let demoLink = '';
+  if (u && recentResets(u.id) < MAX_RESETS_PER_HOUR) {
+    const link = `${await origin()}/reset/${createResetToken(u.id)}`;
+    const sent = await sendMail({
+      to: email,
+      subject: 'Reset your Shasta College Dual Enrollment password',
+      text: `Hi ${u.first_name},\n\nUse this link to set a new password. It works once and expires in ${RESET_MINUTES} minutes:\n\n${link}\n\nIf you didn't ask for this, you can ignore this email.`,
+    });
+    if (!sent) {
+      console.log(`[password reset] email not configured; link for ${email}: ${link}`);
+      if (demoMode()) demoLink = link;
+    }
+  }
+  redirect('/forgot?sent=1' + (demoLink ? `&demo=${encodeURIComponent(demoLink)}` : ''));
+}
+
+export async function resetPassword(formData: FormData) {
+  const token = String(formData.get('token') || '');
+  const password = String(formData.get('password') || '');
+  const confirm = String(formData.get('confirm') || '');
+  const u = resetTokenUser(token);
+  if (!u) redirect('/forgot?error=expired');
+  if (password.length < 8 || password !== confirm) redirect(`/reset/${token}?error=1`);
+  tx(() => {
+    db().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), u!.user_id);
+    useResetTokens(u!.user_id);
+    // Sign out everywhere: anyone holding an old session loses it.
+    db().prepare('DELETE FROM sessions WHERE user_id = ?').run(u!.user_id);
+  });
+  clearFailures(u!.email);
+  redirect('/login?reset=1&email=' + encodeURIComponent(u!.email));
 }

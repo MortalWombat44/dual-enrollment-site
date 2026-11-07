@@ -1,6 +1,7 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
+import { clearFailures, createResetToken } from './security';
 import { cryptoToken, db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
 import { currentTerm, fromPacificInput } from './workflow';
 
@@ -215,4 +216,22 @@ export async function restoreCourse(formData: FormData) {
   await requireAdmin('super');
   db().prepare('UPDATE courses SET active = 1 WHERE id = ?').run(Number(formData.get('id')));
   redirect(courseReturn(formData, 'course_saved=1'));
+}
+
+/** Super admin: make a one-time password reset link to send someone yourself (works without email set up). */
+export async function adminResetLink(formData: FormData) {
+  await requireAdmin('super');
+  const id = Number(formData.get('id'));
+  const u = db().prepare("SELECT id FROM users WHERE id = ? AND status = 'active' AND disabled = 0").get(id);
+  if (!u) redirect('/admin/users?error=reset');
+  const token = createResetToken(id);
+  redirect(`/admin/users?resetfor=${id}&token=${encodeURIComponent(token)}`);
+}
+
+/** Super admin: lift a lockout early. */
+export async function unlockUser(formData: FormData) {
+  await requireAdmin('super');
+  const email = String(formData.get('email') || '');
+  clearFailures(email);
+  redirect('/admin/users?unlocked=1');
 }
