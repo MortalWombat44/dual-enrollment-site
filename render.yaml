@@ -1,0 +1,17 @@
+# Render Blueprint: deploys the Next.js app in web/ as one web service.
+# Free plan: the service sleeps after ~15 minutes idle, and its disk is wiped on every
+# restart or redeploy, so the database goes back to the demo data. For data that sticks,
+# switch to a paid plan, add a persistent disk, and set DE_DATA_DIR to its mount path.
+services:
+  - type: web
+    name: shasta-dual-enrollment
+    runtime: node
+    plan: free
+    rootDir: web
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SHOW_DEMO_ACCOUNTS
+        value: "1"

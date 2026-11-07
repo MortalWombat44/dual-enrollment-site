@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 
 const DEMO = [
   ['Student', 'maya.r@student.suhsd.net'],
+  ['Student (not started)', 'jamie.l@student.andersonhigh.org'],
   ['Parent', 'laura.rivera@gmail.com'],
   ['Parent (new student)', 'chris.lee@gmail.com'],
   ['Counselor', 'ralvarez@suhsd.net'],
@@ -48,7 +49,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Sign in <span>→</span></button>
             </div>
           </form>
-          {process.env.NODE_ENV !== 'production' && (
+          {(process.env.NODE_ENV !== 'production' || process.env.SHOW_DEMO_ACCOUNTS === '1') && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <div className="kicker-sm" style={{ paddingBottom: 8, borderBottom: '2px solid var(--color-text)' }}>Demo accounts · password shasta2027</div>
               {DEMO.map(([role, email]) => (
