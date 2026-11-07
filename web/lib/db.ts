@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS users (
   gpa REAL,
   student_number TEXT,
   counselor_id INTEGER REFERENCES users(id),
+  admin_level TEXT CHECK (admin_level IN ('college','super')),
+  is_college_counselor INTEGER NOT NULL DEFAULT 0,
   share_with_parents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -79,7 +81,8 @@ CREATE TABLE IF NOT EXISTS courses (
   code TEXT NOT NULL,
   title TEXT NOT NULL,
   units INTEGER NOT NULL,
-  schedule TEXT NOT NULL
+  schedule TEXT NOT NULL,
+  prerequisite TEXT
 );
 CREATE TABLE IF NOT EXISTS school_courses (
   school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
@@ -114,14 +117,17 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
   { id: 1, name: 'Apply on CCCApply', short: 'CCCApply', description: 'Creates the Shasta College student record' },
   { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
   { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'E-signature or uploaded signed form' },
-  { id: 4, name: 'Counselor approval', short: 'Counselor approval', description: 'High school counselor reviews the course plan' },
+  // Step 7 was added later, so its id is 7, but it sits 4th: this array's order is the workflow order.
+  { id: 7, name: 'Clear units', short: 'Clear units', description: 'Shasta College checks the courses and unit load' },
+  { id: 8, name: 'Prerequisite review', short: 'Prerequisite review', description: 'A college counselor approves classes that have a prerequisite (only shown when one is requested)' },
+  { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
   { id: 5, name: 'Register for classes', short: 'Register', description: 'Opens on the term registration date' },
   { id: 6, name: 'Textbooks & Canvas access', short: 'Textbooks & Canvas', description: "Shown to students, doesn't block completion" },
 ];
 
 export const DEFAULT_MODES: Record<'CCAP' | 'NON_CCAP', Record<number, Mode>> = {
-  CCAP: { 1: 'required', 2: 'required', 3: 'required', 4: 'off', 5: 'required', 6: 'optional' },
-  NON_CCAP: { 1: 'required', 2: 'required', 3: 'required', 4: 'required', 5: 'required', 6: 'required' },
+  CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'off', 5: 'required', 6: 'optional' },
+  NON_CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'required', 5: 'required', 6: 'required' },
 };
 
 let _db: DatabaseSync | null = null;
@@ -226,6 +232,9 @@ function seed(d: DatabaseSync) {
   const insCourse = d.prepare('INSERT INTO courses (code, title, units, schedule) VALUES (?,?,?,?)');
   const courseIds: Record<string, number> = {};
   for (const c of courses) courseIds[c[0]] = Number(insCourse.run(...c).lastInsertRowid);
+  // Placeholder prerequisites so the Prerequisite review step has something to review.
+  d.prepare('UPDATE courses SET prerequisite = ? WHERE code = ?').run('Intermediate algebra (or math placement)', 'MATH 13');
+  d.prepare('UPDATE courses SET prerequisite = ? WHERE code = ?').run('Eligibility for ENGL 1A', 'AJ 1');
   const insSC = d.prepare('INSERT INTO school_courses (school_id, course_id) VALUES (?,?)');
   for (const sid of Object.values(schoolIds)) for (const cid of Object.values(courseIds)) insSC.run(sid, cid);
 
@@ -237,8 +246,11 @@ function seed(d: DatabaseSync) {
       extra.status === 'invited' ? null : pw, extra.status === 'invited' ? cryptoToken() : null,
       extra.grade ?? null, extra.gpa ?? null, extra.num ?? null, extra.counselor ?? null).lastInsertRowid);
 
-  user('Dana', 'Ortiz', 'dortiz@shastacollege.edu', 'admin', null, { title: 'Super admin' });
-  user('Jordan', 'Kim', 'jkim@shastacollege.edu', 'admin', null, { title: 'Outreach' });
+  const dana = user('Dana', 'Ortiz', 'dortiz@shastacollege.edu', 'admin', null, { title: 'Super admin' });
+  const jordan = user('Jordan', 'Kim', 'jkim@shastacollege.edu', 'admin', null, { title: 'Outreach' });
+  d.prepare("UPDATE users SET admin_level = 'super' WHERE id = ?").run(dana);
+  // Jordan is also designated as a college counselor, so they review prerequisite requests.
+  d.prepare("UPDATE users SET admin_level = 'college', is_college_counselor = 1 WHERE id = ?").run(jordan);
   const alvarez = user('Rosa', 'Alvarez', 'ralvarez@suhsd.net', 'counselor', enterprise, { title: 'Ms.' });
   user('Tom', 'Becker', 'tbecker@andersonhigh.org', 'counselor', anderson, { status: 'invited', title: 'Mr.' });
 
@@ -272,6 +284,12 @@ function seed(d: DatabaseSync) {
       for (const c of s.courses) insReq.run(id, courseIds[c]);
     }
     if (s.days[2]) insProg.run(id, 3, 'complete', s.days[2], JSON.stringify({ method: 'esign', signer: `${s.f === 'Maya' ? 'Laura' : 'Parent of ' + s.f} ${s.l}` }));
+    // Maya, Ethan and Sofia already had their units cleared (now with the counselor);
+    // Lucas and Ava are waiting in the college admin's Clear units queue.
+    if (['Maya', 'Ethan', 'Sofia'].includes(s.f)) {
+      const t = new Date(new Date(s.days[2]!).getTime() + 864e5).toISOString();
+      insProg.run(id, 7, 'complete', t, JSON.stringify({ admin_id: jordan }));
+    }
   }
   const laura = user('Laura', 'Rivera', 'laura.rivera@gmail.com', 'parent', enterprise);
   d.prepare('INSERT INTO parent_links (parent_id, student_id) VALUES (?,?)').run(laura, mayaId);
@@ -292,4 +310,27 @@ function migrate(d: DatabaseSync) {
   if (!cols.includes('share_with_parents')) {
     d.exec('ALTER TABLE users ADD COLUMN share_with_parents INTEGER NOT NULL DEFAULT 0');
   }
+  if (!cols.includes('admin_level')) {
+    d.exec("ALTER TABLE users ADD COLUMN admin_level TEXT CHECK (admin_level IN ('college','super'))");
+    // Existing admins keep full access.
+    d.exec("UPDATE users SET admin_level = 'super' WHERE role = 'admin'");
+  }
+  if (!cols.includes('is_college_counselor')) {
+    d.exec('ALTER TABLE users ADD COLUMN is_college_counselor INTEGER NOT NULL DEFAULT 0');
+  }
+  const courseCols = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
+  if (!courseCols.includes('prerequisite')) d.exec('ALTER TABLE courses ADD COLUMN prerequisite TEXT');
+  // Steps 7 (Clear units) and 8 (Prerequisite review) arrived after launch: add them, on for every school.
+  if (d.prepare('SELECT 1 FROM steps WHERE id = 1').get()) {
+    for (const id of [7, 8]) {
+      if (d.prepare('SELECT 1 FROM steps WHERE id = ?').get(id)) continue;
+      const def = STEP_DEFS.find((x) => x.id === id)!;
+      d.prepare('INSERT INTO steps (id, name, short_name, description) VALUES (?,?,?,?)').run(def.id, def.name, def.short, def.description);
+      d.prepare("INSERT OR IGNORE INTO school_steps (school_id, step_id, mode) SELECT id, ?, 'required' FROM schools").run(id);
+    }
+  }
 }
+
+/** Steps in workflow order (step ids aren't in order, since Clear units was added later). */
+export const STEP_ORDER = STEP_DEFS.map((s) => s.id);
+export const stepIndex = (id: number) => STEP_ORDER.indexOf(id);

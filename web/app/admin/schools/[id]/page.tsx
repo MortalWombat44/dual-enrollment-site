@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireRole } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
 import { db, DEFAULT_MODES } from '@/lib/db';
 import { saveSchool } from '@/lib/admin-actions';
 import { getSchool, schoolModes, schoolStepRows } from '@/lib/workflow';
@@ -11,7 +11,7 @@ import { Flash } from '@/components/chrome';
 export const dynamic = 'force-dynamic';
 
 export default async function SchoolDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; created?: string; error?: string }> }) {
-  const me = await requireRole('admin');
+  const me = await requireAdmin('super');
   const { id } = await params;
   const sp = await searchParams;
   const school = getSchool(Number(id));

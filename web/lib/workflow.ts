@@ -1,5 +1,5 @@
 import 'server-only';
-import { db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
+import { db, DEFAULT_MODES, STEP_DEFS, STEP_ORDER, tx } from './db';
 import type { User } from './auth';
 
 export type Mode = 'required' | 'optional' | 'off';
@@ -8,7 +8,7 @@ export type StepStatus =
   | 'current' // the student can act on it now
   | 'changes' // counselor asked for changes (course selection reopened)
   | 'waiting_parent'
-  | 'in_review'
+  | 'in_review' // waiting on a reviewer: Clear units (7), Prerequisite review (8), High school approval (4)
   | 'scheduled' // ready, but registration hasn't opened
   | 'locked';
 
@@ -21,7 +21,7 @@ export type School = {
   agreement_expires: string | null;
 };
 export type Term = { id: number; name: string; registration_opens: string };
-export type Course = { id: number; code: string; title: string; units: number; schedule: string };
+export type Course = { id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null };
 
 export type StudentStep = {
   id: number; // canonical step id (1–6)
@@ -50,6 +50,8 @@ export type StudentProgress = {
   courses: Course[];
   startedAt: string | null;
   changeNote: string | null;
+  /** Who sent the courses back: the high school counselor or Shasta College. */
+  changeBy: 'counselor' | 'college' | null;
 };
 
 export const TZ = 'America/Los_Angeles';
@@ -86,9 +88,13 @@ export function schoolModes(schoolId: number): Record<number, Mode> {
   return out;
 }
 export function schoolStepRows(schoolId: number) {
-  return db()
-    .prepare('SELECT s.id, s.name, s.description, ss.mode, ss.note FROM steps s LEFT JOIN school_steps ss ON ss.step_id = s.id AND ss.school_id = ? ORDER BY s.id')
+  const rows = db()
+    .prepare('SELECT s.id, s.name, s.description, ss.mode, ss.note FROM steps s LEFT JOIN school_steps ss ON ss.step_id = s.id AND ss.school_id = ?')
     .all(schoolId) as { id: number; name: string; description: string; mode: Mode | null; note: string | null }[];
+  // Show in workflow order, using the current names from the code.
+  return rows
+    .map((r) => { const def = STEP_DEFS.find((d) => d.id === r.id); return def ? { ...r, name: def.name, description: def.description } : r; })
+    .sort((a, b) => STEP_ORDER.indexOf(a.id) - STEP_ORDER.indexOf(b.id));
 }
 export function defaultModes(designation: 'CCAP' | 'NON_CCAP') {
   return DEFAULT_MODES[designation];
@@ -114,7 +120,13 @@ export function getProgress(studentId: number): StudentProgress | null {
       step_id: number; status: string; completed_at: string; seen: number; data: string | null;
     }[]).map((r) => [r.step_id, r]),
   );
-  const changeRow = prog.get(4)?.status === 'changes_requested' ? prog.get(4)! : null;
+  // A reviewer (Clear units, Prerequisite review or High school approval) sent the courses back.
+  const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;
+  const courses = d
+    .prepare('SELECT c.* FROM course_requests r JOIN courses c ON c.id = r.course_id WHERE r.student_id = ? ORDER BY c.code')
+    .all(studentId) as Course[];
+  // Prerequisite review only applies when a requested class has a prerequisite (or it already ran).
+  const needsPrereq = courses.some((c) => c.prerequisite) || (prog.has(8) && prog.get(8)!.status === 'complete');
   const regOpen = new Date(term.registration_opens).getTime() <= Date.now();
 
   const steps: StudentStep[] = [];
@@ -122,6 +134,7 @@ export function getProgress(studentId: number): StudentProgress | null {
   for (const def of STEP_DEFS) {
     const mode = modes[def.id] ?? 'required';
     if (mode === 'off') continue;
+    if (def.id === 8 && !needsPrereq) continue;
     const p = prog.get(def.id);
     const isComplete = p?.status === 'complete';
     let status: StepStatus;
@@ -129,7 +142,7 @@ export function getProgress(studentId: number): StudentProgress | null {
     else if (blocked) status = 'locked';
     else if (def.id === 2 && changeRow) status = 'changes';
     else if (def.id === 3) status = 'waiting_parent';
-    else if (def.id === 4) status = 'in_review';
+    else if (def.id === 4 || def.id === 7 || def.id === 8) status = 'in_review';
     else if (def.id === 5 && !regOpen) status = 'scheduled';
     else status = 'current';
     if (!isComplete && mode === 'required') blocked = true;
@@ -143,9 +156,6 @@ export function getProgress(studentId: number): StudentProgress | null {
   const complete = steps.filter((s) => s.status === 'complete').length;
   const done = steps.every((s) => s.status === 'complete' || s.mode === 'optional');
   const next = steps.find((s) => s.status !== 'complete' && s.status !== 'locked') ?? null;
-  const courses = d
-    .prepare('SELECT c.* FROM course_requests r JOIN courses c ON c.id = r.course_id WHERE r.student_id = ? ORDER BY c.code')
-    .all(studentId) as Course[];
   const parents = d
     .prepare('SELECT u.* FROM parent_links l JOIN users u ON u.id = l.parent_id WHERE l.student_id = ?')
     .all(studentId) as User[];
@@ -153,6 +163,7 @@ export function getProgress(studentId: number): StudentProgress | null {
     student, school, term, counselor: getUser(student.counselor_id), parents, steps, complete, total: steps.length,
     done, next, courses, startedAt: enr?.started_at ?? null,
     changeNote: changeRow?.data ? (JSON.parse(changeRow.data).note as string) ?? null : null,
+    changeBy: changeRow ? (changeRow.step_id === 4 ? 'counselor' : 'college') : null,
   };
 }
 
@@ -177,12 +188,24 @@ export function completeStep(studentId: number, stepId: number, data: Record<str
   });
 }
 
-export function requestChanges(studentId: number, counselor: User, note: string) {
+/** A reviewer step (4, 7 or 8) sends the courses back: course selection reopens with the reviewer's note. */
+export function requestChanges(studentId: number, stepId: number, by: User, note: string) {
   const d = db();
   tx(() => {
     d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = 2').run(studentId);
-    d.prepare('INSERT OR REPLACE INTO step_progress (student_id, step_id, status, completed_at, data) VALUES (?,4,?,?,?)').run(
-      studentId, 'changes_requested', now(), JSON.stringify({ counselor_id: counselor.id, note }));
+    d.prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
+    d.prepare('INSERT OR REPLACE INTO step_progress (student_id, step_id, status, completed_at, data) VALUES (?,?,?,?,?)').run(
+      studentId, stepId, 'changes_requested', now(), JSON.stringify({ by_id: by.id, note }));
+  });
+}
+
+/** Admin override: reopen a step and every step after it (later steps depended on it). */
+export function reopenFrom(studentId: number, stepId: number) {
+  const later = STEP_ORDER.slice(STEP_ORDER.indexOf(stepId));
+  const d = db();
+  tx(() => {
+    const del = d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = ?');
+    for (const id of later) del.run(studentId, id);
   });
 }
 
@@ -207,4 +230,32 @@ export function daysSince(iso: string | null): string {
 
 export function markSeen(studentId: number, stepId: number) {
   db().prepare('UPDATE step_progress SET seen = 1 WHERE student_id = ? AND step_id = ?').run(studentId, stepId);
+}
+
+export const STUDENT_STEP_IDS = STEP_ORDER;
+
+/** ISO time → "YYYY-MM-DDTHH:mm" in Pacific time, for a datetime-local input. */
+export function toPacificInput(iso: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(iso)).map((x) => [x.type, x.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+/** "YYYY-MM-DDTHH:mm" typed as Pacific time → ISO (handles daylight saving). */
+export function fromPacificInput(local: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(local);
+  if (!m) return null;
+  const asUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  // Find the Pacific offset at that moment, then correct (twice, in case the guess crosses a DST change).
+  let t = asUtc;
+  for (let i = 0; i < 2; i++) {
+    const shown = toPacificInput(new Date(t).toISOString());
+    const [d, h] = shown.split('T');
+    const [y, mo, da] = d.split('-').map(Number);
+    const [hh, mm] = h.split(':').map(Number);
+    t += asUtc - Date.UTC(y, mo - 1, da, hh, mm);
+  }
+  return new Date(t).toISOString();
 }

@@ -21,7 +21,8 @@ Demo accounts (password `shasta2027`):
 | Student (not started, no parent yet) | jamie.l@student.andersonhigh.org |
 | Parent of Maya (Maya shares her progress) | laura.rivera@gmail.com |
 | Counselor, Enterprise HS | ralvarez@suhsd.net |
-| Admin | dortiz@shastacollege.edu |
+| Super admin | dortiz@shastacollege.edu |
+| College admin + college counselor | jkim@shastacollege.edu |
 
 ## Screens → routes
 
@@ -33,9 +34,30 @@ Demo accounts (password `shasta2027`):
 | 1a Dashboard with 4-up grid + contact cell | `/parent` (parent's view of their student) |
 | 2b Parent consent: draw-to-sign or upload | `/parent/consent` |
 | 2c Counselor review queue | `/counselor` |
-| 3a Users + Add user | `/admin/users` |
+| Admin student queue (counselor-style) | `/admin/students` |
+| 3a Users + Add user (super admin) | `/admin/users` |
 | 3b Schools + Add school | `/admin/schools` |
 | 3c School designation + step rules | `/admin/schools/[id]` |
+| Term + registration date (super admin) | `/admin/terms` |
+
+## Steps (in order)
+
+1. Apply on CCCApply (student)
+2. Course selection (student)
+3. Parent consent (parent, invited by the student)
+4. Clear units (college admin)
+5. Prerequisite review (college counselor). Only shown when a requested class has a prerequisite.
+6. High school approval (high school counselor)
+7. Register for classes (student, after the registration date)
+8. Textbooks & Canvas (student)
+
+Step ids in the database don't follow this order (Clear units is id 7, Prerequisite review id 8), so always use `STEP_DEFS` / `STEP_ORDER` in `lib/db.ts` for ordering.
+
+## Admin levels
+
+- **College admin**: the Students page for every school. Can clear units, move any step forward (mark complete) or back (reopen it and every later step), request or remove classes for a student, and move a student to another school.
+- **College counselor**: a flag on any admin. Only these admins can approve or decline classes with a prerequisite. A declined class comes off the request; if nothing is left, the student goes back to Course selection with the note.
+- **Super admin**: everything above, plus Users (create users and admins, set admin level and the college counselor flag), Schools (add schools, edit step rules) and Terms (registration date).
 
 ## Workflow rules
 

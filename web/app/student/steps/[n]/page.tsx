@@ -121,12 +121,13 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
   if (s.id === 3) {
     cells = [
       ['Signed by', String(d.signer ?? '—'), 'Parent / guardian'],
-      ['Signed on', fmt(s.completedAt, 'mdy'), `${fmt(s.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded form' : 'e-signature'}`],
+      ['Signed on', fmt(s.completedAt, 'mdy'), `${fmt(s.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded form' : d.method === 'office' ? 'marked complete by Shasta College' : 'e-signature'}`],
       ['Units requested', String(units || '—'), p.term.name],
     ];
-  } else if (s.id === 4) {
+  } else if (s.id === 4 || s.id === 7 || s.id === 8) {
     cells = [
-      ['Approved by', p.counselor ? displayName(p.counselor, true) : '—', `${p.school.name} · ${fmt(s.completedAt)}`],
+      s.id === 4 ? ['Approved by', p.counselor ? displayName(p.counselor, true) : '—', `${p.school.name} · ${fmt(s.completedAt)}`]
+        : [s.id === 7 ? 'Cleared by' : 'Approved by', s.id === 7 ? 'Shasta College' : 'College counselor', fmt(s.completedAt)],
       ['Note', d.note ? `“${String(d.note)}”` : '—', ''],
       ['Units approved', String(units), p.term.name],
     ];
@@ -157,12 +158,15 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
   const body =
     s.status === 'locked' ? `Finish step ${pad(prevReq?.num ?? s.num - 1)}, ${prevReq?.short.toLowerCase() ?? 'the step before this one'}, first.` :
     s.status === 'scheduled' ? `Registration for ${p.term.name} opens ${fmt(p.term.registration_opens, 'wmd')} at ${fmt(p.term.registration_opens, 'time')}.` :
-    s.status === 'in_review' ? `${counselor} is reviewing your course plan. Usually 2–3 school days.` :
+    s.status === 'in_review' ? (
+      s.id === 7 ? 'Shasta College is checking your courses and unit load. Usually 1–2 days.' :
+      s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
+      `${counselor} is reviewing your course plan. Usually 2–3 school days.`) :
     s.status === 'waiting_parent' ? (
       p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form from their own account.` :
       p.parents[0] ? `${displayName(p.parents[0])} hasn't accepted your invite yet. Send them the link below again if they need it.` :
       'Invite your parent or guardian to sign. They get their own account, and it takes them about two minutes.') :
-    s.status === 'changes' ? `${counselor} asked for changes to your course plan.` :
+    s.status === 'changes' ? `${p.changeBy === 'college' ? 'Shasta College' : counselor} asked for changes to your course plan.` :
     s.description + '.';
   return (
     <>
@@ -184,7 +188,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
           <form action={submitCourses} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {p.changeNote && (
               <div style={{ borderLeft: '4px solid var(--color-accent)', background: 'var(--color-accent-100)', padding: '14px 18px' }}>
-                <div className="kicker-sm accent700">Note from {counselor}</div>
+                <div className="kicker-sm accent700">Note from {p.changeBy === 'college' ? 'Shasta College' : counselor}</div>
                 <div style={{ fontSize: 15, marginTop: 4 }}>“{p.changeNote}”</div>
               </div>
             )}

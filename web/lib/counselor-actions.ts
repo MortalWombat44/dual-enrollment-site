@@ -23,6 +23,6 @@ export async function approve(formData: FormData) {
 export async function sendBack(formData: FormData) {
   const { me, studentId, note, name } = await guard(formData);
   if (!note) redirect(`/counselor?student=${studentId}&error=note`);
-  requestChanges(studentId, me, note);
+  requestChanges(studentId, 4, me, note);
   redirect(`/counselor?done=changes&name=${encodeURIComponent(name)}`);
 }

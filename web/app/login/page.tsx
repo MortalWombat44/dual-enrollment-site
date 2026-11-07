@@ -9,7 +9,8 @@ const DEMO = [
   ['Student (not started)', 'jamie.l@student.andersonhigh.org'],
   ['Parent of Maya', 'laura.rivera@gmail.com'],
   ['Counselor', 'ralvarez@suhsd.net'],
-  ['Admin', 'dortiz@shastacollege.edu'],
+  ['Super admin', 'dortiz@shastacollege.edu'],
+  ['College admin + college counselor', 'jkim@shastacollege.edu'],
 ];
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; email?: string }> }) {

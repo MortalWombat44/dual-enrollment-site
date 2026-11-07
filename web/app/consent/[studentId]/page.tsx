@@ -52,7 +52,7 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
       </p>
       <div>
         {line('Parent / guardian name', d.signer)}
-        {line('Signed', step?.completedAt ? `${fmt(step.completedAt, 'mdy')}, ${fmt(step.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded signed form' : 'e-signature'}` : undefined)}
+        {line('Signed', step?.completedAt ? `${fmt(step.completedAt, 'mdy')}, ${fmt(step.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded signed form' : d.method === 'office' ? 'on file with Shasta College' : 'e-signature'}` : undefined)}
       </div>
       {file && file.kind === 'signature' && (
         <div style={{ border: '2px solid var(--color-text)', background: '#fff', padding: 12 }}>

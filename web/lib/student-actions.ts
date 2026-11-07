@@ -33,7 +33,7 @@ export async function submitCourses(formData: FormData) {
     db().prepare('DELETE FROM course_requests WHERE student_id = ?').run(me.id);
     const ins = db().prepare('INSERT INTO course_requests (student_id, course_id) VALUES (?,?)');
     for (const id of picked) ins.run(me.id, id);
-    db().prepare("DELETE FROM step_progress WHERE student_id = ? AND step_id = 4 AND status = 'changes_requested'").run(me.id);
+    db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(me.id);
   });
   completeStep(me.id, 2, { units });
   redirect('/student/steps/2/complete');

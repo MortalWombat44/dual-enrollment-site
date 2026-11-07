@@ -18,6 +18,8 @@ export type User = {
   gpa: number | null;
   student_number: string | null;
   counselor_id: number | null;
+  admin_level: 'college' | 'super' | null;
+  is_college_counselor: number;
 };
 
 const COOKIE = 'de_session';
@@ -27,7 +29,7 @@ export const HOME: Record<Role, string> = {
   student: '/student',
   parent: '/parent',
   counselor: '/counselor',
-  admin: '/admin/users',
+  admin: '/admin/students',
 };
 
 export async function createSession(userId: number) {
@@ -55,7 +57,7 @@ export async function currentUser(): Promise<User | null> {
   if (!token) return null;
   const row = db()
     .prepare(
-      `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.gpa, u.student_number, u.counselor_id
+      `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.gpa, u.student_number, u.counselor_id, u.admin_level, u.is_college_counselor
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ? AND s.expires_at > ?`,
     )
@@ -67,5 +69,12 @@ export async function requireRole(...roles: Role[]): Promise<User> {
   const u = await currentUser();
   if (!u) redirect('/login');
   if (!roles.includes(u.role)) redirect(HOME[u.role]);
+  return u;
+}
+
+/** Any admin. College admins work with students; super admins can also manage users, schools and terms. */
+export async function requireAdmin(level: 'college' | 'super' = 'college'): Promise<User> {
+  const u = await requireRole('admin');
+  if (level === 'super' && u.admin_level !== 'super') redirect('/admin/students');
   return u;
 }

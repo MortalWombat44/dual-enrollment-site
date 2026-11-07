@@ -72,12 +72,12 @@ export function SchoolEditor({
           </button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', borderTop: '2px solid var(--color-text)' }}>
-          {steps.map((s) => {
+          {steps.map((s, i) => {
             const mode = modes[s.id] ?? 'required';
             const off = mode === 'off';
             return (
               <div key={s.id} className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '56px 1fr 320px', alignItems: 'center', padding: '16px 0', borderBottom: '2px solid var(--color-divider)', gap: 8, color: off ? 'var(--ink-55)' : undefined }}>
-                <span style={{ fontSize: 24, fontWeight: 800, color: off ? undefined : mode === 'optional' ? 'var(--color-accent-700)' : 'var(--color-accent)' }}>{String(s.id).padStart(2, '0')}</span>
+                <span style={{ fontSize: 24, fontWeight: 800, color: off ? undefined : mode === 'optional' ? 'var(--color-accent-700)' : 'var(--color-accent)' }}>{String(i + 1).padStart(2, '0')}</span>
                 <div><div style={{ fontWeight: 700, fontSize: 15 }}>{s.name}</div><div style={{ fontSize: 13 }}>{stepNote(s, mode, des)}</div></div>
                 <div className="seg seg-modes" role="radiogroup" aria-label={`${s.name} setting`} style={{ display: 'flex', justifySelf: 'end', color: 'var(--color-text)' }}>
                   {(['required', 'optional', 'off'] as const).map((m) => (

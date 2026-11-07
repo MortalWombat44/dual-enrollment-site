@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { requireRole } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { addSchool } from '@/lib/admin-actions';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 type Row = { id: number; name: string; district: string; designation: 'CCAP' | 'NON_CCAP'; required: number; total: number; students: number };
 
 export default async function SchoolsPage({ searchParams }: { searchParams: Promise<{ add?: string; error?: string }> }) {
-  const me = await requireRole('admin');
+  const me = await requireAdmin('super');
   const sp = await searchParams;
   const rows = db().prepare(`
     SELECT s.id, s.name, s.district, s.designation,

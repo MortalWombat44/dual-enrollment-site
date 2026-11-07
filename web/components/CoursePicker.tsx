@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 
-type Course = { id: number; code: string; title: string; units: number; schedule: string };
+type Course = { id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null };
 
 export function CoursePicker({ courses, initial, max }: { courses: Course[]; initial: number[]; max: number }) {
   const [sel, setSel] = useState<Set<number>>(new Set(initial));
@@ -24,7 +24,7 @@ export function CoursePicker({ courses, initial, max }: { courses: Course[]; ini
             />
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>{c.code} · {c.title}</div>
-              <div className="ink60" style={{ fontSize: 13 }}>{c.schedule}</div>
+              <div className="ink60" style={{ fontSize: 13 }}>{c.schedule}{c.prerequisite ? ` · Prerequisite: ${c.prerequisite} (a college counselor reviews this)` : ''}</div>
             </div>
             <span style={{ fontSize: 13, paddingRight: 8 }}>{c.units} units</span>
           </label>

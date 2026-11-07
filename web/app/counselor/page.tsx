@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, stepIndex } from '@/lib/db';
 import { currentTerm, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
 import { approve, sendBack } from '@/lib/counselor-actions';
 import { TopBar, Flash } from '@/components/chrome';
@@ -23,7 +23,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
     approved: all.filter((p) => s4(p)?.status === 'complete'),
   };
   // Oldest submissions first in the review queue.
-  const submittedAt = (p: StudentProgress) => [...p.steps].reverse().find((s) => s.id < 4 && s.completedAt)?.completedAt ?? '';
+  const submittedAt = (p: StudentProgress) => [...p.steps].reverse().find((s) => stepIndex(s.id) < stepIndex(4) && s.completedAt)?.completedAt ?? '';
   groups.ready.sort((a, b) => submittedAt(a).localeCompare(submittedAt(b)));
   const missingConsent = all.filter((p) => p.steps.find((s) => s.id === 3)?.status === 'waiting_parent').length;
   const tab: Tab = sp.tab === 'incomplete' || sp.tab === 'approved' ? sp.tab : 'ready';
@@ -46,7 +46,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
       <TopBar user={me} nav={[{ href: '/counselor', label: 'Review queue' }]} current="/counselor" right={<span className="tag tag-neutral">Counselor · {school?.name.replace('High School', 'HS') ?? '—'}</span>} />
       <Flash msg={flash} />
       <Flash msg={sp.error === 'note' ? 'Add a note so the student knows what to change.' : null} error />
-      {counselorOff && <Flash msg={`Counselor approval is turned off for ${school?.name}. New students skip this step.`} />}
+      {counselorOff && <Flash msg={`High school approval is turned off for ${school?.name}. New students skip this step.`} />}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label="Waiting on you" value={String(groups.ready.length)} hero />
         <Stat label="Missing parent consent" value={String(missingConsent)} />
@@ -104,7 +104,7 @@ function ReviewPanel({ p }: { p: StudentProgress | null }) {
   if (!p) return <div className="pad-sm ink60" style={{ padding: '28px 32px', fontSize: 14 }}>Pick a student to see their plan.</div>;
   const s4 = p.steps.find((s) => s.id === 4);
   const canAct = s4?.status === 'in_review';
-  const before = p.steps.filter((s) => s.id < 4);
+  const before = p.steps.filter((s) => stepIndex(s.id) < stepIndex(4));
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="pad-sm" style={{ padding: '28px 32px', borderBottom: '2px solid var(--color-divider)' }}>

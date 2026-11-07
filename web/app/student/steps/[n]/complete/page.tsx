@@ -24,12 +24,14 @@ export default async function CompletePage({ params }: { params: Promise<{ n: st
   const by =
     s.id === 3 ? { k: 'Signed by', v: String(d.signer ?? '—'), sub: `Parent / guardian · ${fmt(s.completedAt)}` } :
     s.id === 4 ? { k: 'Approved by', v: p.counselor ? displayName(p.counselor, true) : '—', sub: `${p.school.name} · ${fmt(s.completedAt)}` } :
+    s.id === 7 ? { k: 'Cleared by', v: 'Shasta College', sub: fmt(s.completedAt) } :
+    s.id === 8 ? { k: 'Approved by', v: 'College counselor', sub: `Shasta College · ${fmt(s.completedAt)}` } :
     { k: 'Completed', v: fmt(s.completedAt, 'mdy'), sub: fmt(s.completedAt, 'time') };
   const note =
-    s.id === 4 ? (d.note ? `“${String(d.note)}”` : 'No note.') :
+    s.id === 4 || s.id === 7 || s.id === 8 ? (d.note ? `“${String(d.note)}”` : 'No note.') :
     s.id === 2 ? p.courses.map((c) => `${c.code} · ${c.units} units`).join(' · ') :
     s.id === 1 ? `Confirmation ${String(d.confirmation ?? '')}` :
-    s.id === 3 ? (d.method === 'upload' ? 'Signed form uploaded.' : 'Signed online.') :
+    s.id === 3 ? (d.method === 'upload' ? 'Signed form uploaded.' : d.method === 'office' ? 'Consent on file with Shasta College.' : 'Signed online.') :
     `${p.term.name} · ${p.school.name}`;
 
   return (
@@ -56,7 +58,7 @@ export default async function CompletePage({ params }: { params: Promise<{ n: st
             <div style={{ fontSize: 13, marginTop: 2 }}>{by.sub}</div>
           </div>
           <div style={{ padding: '28px 32px', borderRight: '2px solid var(--color-divider)' }}>
-            <div className="ink60" style={{ fontSize: 12 }}>{s.id === 4 ? 'Note' : 'Details'}</div>
+            <div className="ink60" style={{ fontSize: 12 }}>{s.id === 4 || s.id === 7 || s.id === 8 ? 'Note' : 'Details'}</div>
             <div style={{ fontSize: 15, marginTop: 4 }}>{note}</div>
           </div>
           <div style={{ padding: '28px 32px', background: 'var(--color-accent-100)', display: 'flex', flexDirection: 'column', gap: 12 }}>

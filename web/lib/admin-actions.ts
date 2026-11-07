@@ -1,20 +1,22 @@
 'use server';
 import { redirect } from 'next/navigation';
-import { requireRole } from './auth';
+import { requireAdmin } from './auth';
 import { cryptoToken, db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
-import { currentTerm } from './workflow';
+import { currentTerm, fromPacificInput } from './workflow';
 
 const ROLES = ['student', 'counselor', 'admin'] as const; // parents are invited by their student
 const MODES = ['required', 'optional', 'off'] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function addUser(formData: FormData) {
-  await requireRole('admin');
+  await requireAdmin('super');
   const first = String(formData.get('first') || '').trim();
   const last = String(formData.get('last') || '').trim();
   const email = String(formData.get('email') || '').trim().toLowerCase();
   const role = String(formData.get('role') || '') as (typeof ROLES)[number];
   const schoolId = Number(formData.get('school')) || null;
+  const level = formData.get('admin_level') === 'super' ? 'super' : 'college';
+  const collegeCounselor = role === 'admin' && formData.get('college_counselor') === 'on' ? 1 : 0;
   const fail = (e: string) => redirect(`/admin/users?add=1&error=${e}`);
   if (!first || !last) fail('name');
   if (!EMAIL.test(email)) fail('email');
@@ -29,8 +31,8 @@ export async function addUser(formData: FormData) {
       ? (db().prepare("SELECT id FROM users WHERE role = 'counselor' AND school_id = ? ORDER BY status = 'active' DESC, id LIMIT 1").get(schoolId) as { id: number } | undefined)?.id ?? null
       : null;
     const r = db()
-      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id) VALUES (?,?,?,?,?,'invited',?,?)")
-      .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor);
+      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor) VALUES (?,?,?,?,?,'invited',?,?,?,?)")
+      .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor, role === 'admin' ? level : null, collegeCounselor);
     const uid = Number(r.lastInsertRowid);
     if (role === 'student') db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, currentTerm().id);
     return uid;
@@ -39,7 +41,7 @@ export async function addUser(formData: FormData) {
 }
 
 export async function addSchool(formData: FormData) {
-  await requireRole('admin');
+  await requireAdmin('super');
   const name = String(formData.get('name') || '').trim();
   const district = String(formData.get('district') || '').trim();
   const des = formData.get('designation') === 'NON_CCAP' ? 'NON_CCAP' : 'CCAP';
@@ -57,7 +59,7 @@ export async function addSchool(formData: FormData) {
 }
 
 export async function saveSchool(formData: FormData) {
-  await requireRole('admin');
+  await requireAdmin('super');
   const id = Number(formData.get('id'));
   if (!db().prepare('SELECT 1 FROM schools WHERE id = ?').get(id)) redirect('/admin/schools');
   const des = formData.get('designation') === 'NON_CCAP' ? 'NON_CCAP' : 'CCAP';
@@ -78,4 +80,27 @@ export async function saveSchool(formData: FormData) {
     for (const s of STEP_DEFS) up.run(id, s.id, modes[s.id]);
   });
   redirect(`/admin/schools/${id}?saved=1`);
+}
+
+export async function saveTerm(formData: FormData) {
+  await requireAdmin('super');
+  const id = Number(formData.get('id'));
+  const name = String(formData.get('name') || '').trim().slice(0, 60);
+  const iso = fromPacificInput(String(formData.get('opens') || ''));
+  if (!name || !iso) redirect('/admin/terms?error=1');
+  db().prepare('UPDATE terms SET name = ?, registration_opens = ? WHERE id = ?').run(name, iso, id);
+  redirect('/admin/terms?saved=1');
+}
+
+/** Super admin: change an admin's level or college-counselor flag. */
+export async function updateAdmin(formData: FormData) {
+  const me = await requireAdmin('super');
+  const id = Number(formData.get('id'));
+  const u = db().prepare("SELECT id FROM users WHERE id = ? AND role = 'admin'").get(id);
+  if (!u) redirect('/admin/users?role=admin');
+  const level = formData.get('admin_level') === 'super' ? 'super' : 'college';
+  // Don't let a super admin lock everyone out by demoting themselves.
+  if (id === me.id && level !== 'super') redirect('/admin/users?role=admin&error=self');
+  db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ? WHERE id = ?').run(level, formData.get('college_counselor') === 'on' ? 1 : 0, id);
+  redirect('/admin/users?role=admin&updated=' + id);
 }

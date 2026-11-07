@@ -7,6 +7,7 @@ type School = { id: number; name: string; designation: string };
 export function AddUserDialog({ action, schools, error }: { action: (fd: FormData) => Promise<void>; schools: School[]; error?: string }) {
   const [role, setRole] = useState('counselor');
   const [school, setSchool] = useState<number>(schools[0]?.id ?? 0);
+  const [level, setLevel] = useState('college');
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
       <form action={action} className="modal">
@@ -40,7 +41,22 @@ export function AddUserDialog({ action, schools, error }: { action: (fd: FormDat
               </select>
             </div>
           ) : (
-            <div className="field"><label>School</label><div className="input" style={{ display: 'flex', alignItems: 'center' }}>Shasta College</div></div>
+            <>
+              <div className="field">
+                <label>Admin level</label>
+                <div className="seg seg-ink" style={{ display: 'flex' }} role="radiogroup" aria-label="Admin level">
+                  <label className="seg-opt" style={{ flex: 1 }}><input type="radio" name="admin_level" value="college" checked={level === 'college'} onChange={() => setLevel('college')} />College admin</label>
+                  <label className="seg-opt" style={{ flex: 1 }}><input type="radio" name="admin_level" value="super" checked={level === 'super'} onChange={() => setLevel('super')} />Super admin</label>
+                </div>
+                <div className="ink60" style={{ fontSize: 12, marginTop: 6 }}>
+                  {level === 'college' ? 'Works with students at every school: clears units, moves steps, requests classes, changes schools.' : 'Everything a college admin does, plus users, schools, admins and the registration date.'}
+                </div>
+              </div>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                <input type="checkbox" name="college_counselor" style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+                College counselor (approves classes with a prerequisite)
+              </label>
+            </>
           )}
         </div>
         <div className="modal-foot">
