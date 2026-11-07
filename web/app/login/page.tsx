@@ -39,7 +39,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
           {sp.error && (
             <div className="flash flash-err" style={{ padding: '12px 16px' }}>
-              {sp.error === 'invite' ? 'That invite link has already been used or is no longer valid.' : "That email and password don't match an active account."}
+              {sp.error === 'invite' ? 'That invite link has already been used or is no longer valid.'
+                : sp.error === 'disabled' ? 'This account has been disabled. Contact Shasta College Outreach if you think this is a mistake.'
+                : "That email and password don't match an active account."}
             </div>
           )}
           <form action={login} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

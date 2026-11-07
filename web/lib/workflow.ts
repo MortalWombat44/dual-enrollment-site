@@ -20,7 +20,7 @@ export type School = {
   agreement_id: string | null;
   agreement_expires: string | null;
 };
-export type Term = { id: number; name: string; registration_opens: string; is_current?: number };
+export type Term = { id: number; name: string; registration_opens: string; is_current?: number; summer?: number };
 export type Course = { id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null };
 /** A requested class, with the term the student asked to take it in. */
 export type RequestedCourse = Course & { term_id: number | null; term_name: string | null };
@@ -86,10 +86,10 @@ export function getSchool(id: number): School | null {
 }
 /** All terms, newest registration first. `is_current` = 1 means active (taking students). */
 export function allTerms(): Term[] {
-  return db().prepare('SELECT id, name, registration_opens, is_current FROM terms ORDER BY registration_opens DESC').all() as Term[];
+  return db().prepare('SELECT id, name, registration_opens, is_current, summer FROM terms ORDER BY registration_opens DESC').all() as Term[];
 }
 export function activeTerms(): Term[] {
-  return db().prepare('SELECT id, name, registration_opens, is_current FROM terms WHERE is_current = 1 ORDER BY registration_opens').all() as Term[];
+  return db().prepare('SELECT id, name, registration_opens, is_current, summer FROM terms WHERE is_current = 1 ORDER BY registration_opens').all() as Term[];
 }
 /** The term new students land in when none is chosen: the active term whose registration opens soonest. */
 export function currentTerm(): Term {
@@ -101,7 +101,7 @@ export function nextRegistration(): Term {
   return active.find((t) => new Date(t.registration_opens).getTime() > Date.now()) ?? active.at(-1) ?? currentTerm();
 }
 export function getTerm(id: number): Term | null {
-  return (db().prepare('SELECT id, name, registration_opens, is_current FROM terms WHERE id = ?').get(id) as Term | undefined) ?? null;
+  return (db().prepare('SELECT id, name, registration_opens, is_current, summer FROM terms WHERE id = ?').get(id) as Term | undefined) ?? null;
 }
 export function schoolModes(schoolId: number): Record<number, Mode> {
   const rows = db().prepare('SELECT step_id, mode FROM school_steps WHERE school_id = ?').all(schoolId) as { step_id: number; mode: Mode }[];

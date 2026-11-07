@@ -127,7 +127,7 @@ function ReviewPanel({ p }: { p: StudentProgress | null }) {
       </div>
       <div className="pad-sm" style={{ padding: '20px 32px', borderBottom: '2px solid var(--color-divider)' }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Courses requested</div>
-        {p.courses.length ? <TermCourses courses={p.courses} terms={p.requestTerms} compact /> : <div className="ink60" style={{ fontSize: 14, marginTop: 6 }}>None yet</div>}
+        {p.courses.length ? <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact /> : <div className="ink60" style={{ fontSize: 14, marginTop: 6 }}>None yet</div>}
       </div>
       {canAct ? (
         <form style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>

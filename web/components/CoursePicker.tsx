@@ -2,13 +2,13 @@
 import { useState } from 'react';
 
 type Course = { id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null };
-type Term = { id: number; name: string; opens: string };
+type Term = { id: number; name: string; opens: string; limit: number };
 
 /**
  * Pick classes and, for each one, the term to take it in. Only terms with registration allowed are offered.
- * The unit limit applies per term.
+ * Unit limits are per term (by school designation and summer) and only show a note when exceeded.
  */
-export function CoursePicker({ courses, initial, terms, max }: { courses: Course[]; initial: { id: number; term_id: number | null }[]; terms: Term[]; max: number }) {
+export function CoursePicker({ courses, initial, terms, ccap }: { courses: Course[]; initial: { id: number; term_id: number | null }[]; terms: Term[]; ccap: boolean }) {
   const allowed = new Set(terms.map((t) => t.id));
   const [sel, setSel] = useState<Map<number, number>>(
     new Map(initial.map((c) => [c.id, c.term_id && allowed.has(c.term_id) ? c.term_id : terms[0]?.id ?? 0])),
@@ -26,7 +26,7 @@ export function CoursePicker({ courses, initial, terms, max }: { courses: Course
         <span>Sections offered for your school</span>
         <span style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           {terms.map((t) => (
-            <span key={t.id} style={{ color: unitsIn(t.id) > max ? '#b3261e' : undefined }}>{t.name}: {unitsIn(t.id)} of {max} units</span>
+            <span key={t.id} style={{ color: unitsIn(t.id) > t.limit ? '#8a4b00' : undefined }}>{t.name}: {unitsIn(t.id)} of {t.limit} units</span>
           ))}
         </span>
       </div>
@@ -50,7 +50,11 @@ export function CoursePicker({ courses, initial, terms, max }: { courses: Course
           </div>
         );
       })}
-      {terms.some((t) => unitsIn(t.id) > max) && <div style={{ fontSize: 13, color: '#b3261e', marginTop: 8 }}>Dual enrollment students can take up to {max} units a term.</div>}
+      {terms.filter((t) => unitsIn(t.id) > t.limit).map((t) => (
+        <div key={t.id} style={{ fontSize: 13, background: '#fff4e0', color: '#8a4b00', borderLeft: '4px solid #d08a00', padding: '8px 12px', marginTop: 8 }}>
+          Note: {unitsIn(t.id)} units in {t.name} is over the usual {t.limit}-unit limit for {ccap ? 'CCAP' : 'non-CCAP'} students. You can still submit; Shasta College will review it when clearing your units.
+        </div>
+      ))}
       <div className="ink60" style={{ fontSize: 13, marginTop: 10 }}>
         Registration: {terms.map((t) => `${t.name} opens ${t.opens}`).join(' · ')}
       </div>

@@ -4,7 +4,6 @@ import { requireRole } from './auth';
 import { cryptoToken, db, tx } from './db';
 import { activeTerms, completeStep, getProgress, schoolCourses } from './workflow';
 
-import { MAX_UNITS } from './constants';
 
 async function stepFor(stepId: number, allowed: string[]) {
   const me = await requireRole('student');
@@ -27,13 +26,10 @@ export async function submitCourses(formData: FormData) {
   const offered = new Map(schoolCourses(p.school.id).map((c) => [c.id, c]));
   const picked = [...new Set(formData.getAll('course').map(Number))].filter((id) => offered.has(id));
   if (picked.length === 0) redirect('/student/steps/2?error=none');
-  // Every class needs a term that's open for registration; the unit limit is per term.
+  // Every class needs a term that's open for registration. Going over the unit limit is allowed (the student sees a note).
   const open = new Set(activeTerms().map((t) => t.id));
   const termOf = new Map(picked.map((id) => [id, Number(formData.get(`term_${id}`))]));
   if ([...termOf.values()].some((t) => !open.has(t))) redirect('/student/steps/2?error=term');
-  const perTerm = new Map<number, number>();
-  for (const id of picked) perTerm.set(termOf.get(id)!, (perTerm.get(termOf.get(id)!) ?? 0) + offered.get(id)!.units);
-  if ([...perTerm.values()].some((u) => u > MAX_UNITS)) redirect('/student/steps/2?error=units');
   const units = picked.reduce((n, id) => n + offered.get(id)!.units, 0);
   tx(() => {
     db().prepare('DELETE FROM course_requests WHERE student_id = ?').run(me.id);

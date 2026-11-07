@@ -221,7 +221,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <Hidden p={p} keep={keep} />
           <input type="hidden" name="stepId" value={7} />
           <div className="kicker accent700">Clear units</div>
-          <TermCourses courses={p.courses} terms={p.requestTerms} compact />
+          <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact />
           <div className="field"><label htmlFor="n7">Note to student (required to send back)</label><textarea id="n7" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} /></div>
           <button formAction={clearUnits} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Clear units <span>→</span></button>
           <button formAction={sendBackToStudent} className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Send back to student</button>

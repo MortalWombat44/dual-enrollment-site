@@ -5,7 +5,7 @@ import { activeTerms, displayName, fmt, getProgress, pad, schoolCourses, type St
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
 import { submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
-import { MAX_UNITS } from '@/lib/constants';
+import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
 import { PacketTable } from '@/components/PacketTable';
 import { ParentInvite } from '@/components/ParentInvite';
@@ -16,7 +16,6 @@ export const dynamic = 'force-dynamic';
 const ERRORS: Record<string, string> = {
   confirmation: 'Enter the confirmation number from your CCCApply email (letters, numbers and dashes).',
   none: 'Pick at least one course.',
-  units: `That's more than ${MAX_UNITS} units in one term. Remove a class or move it to another term.`,
   term: 'Pick an open term for every class.',
 };
 
@@ -197,8 +196,8 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
             <CoursePicker
               courses={schoolCourses(p.school.id)}
               initial={p.courses.map((c) => ({ id: c.id, term_id: c.term_id }))}
-              terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy') }))}
-              max={MAX_UNITS}
+              terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy'), limit: unitLimit(p.school.designation, t.summer === 1) }))}
+              ccap={p.school.designation === 'CCAP'}
             />
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
           </form>
@@ -207,7 +206,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
         {(s.status === 'in_review' || s.status === 'waiting_parent' || s.status === 'locked' || s.status === 'scheduled' || (s.id === 5 && s.status === 'current')) && p.courses.length > 0 && (
           <div>
             <div className="kicker-sm" style={{ paddingBottom: 8 }}>Your classes by term</div>
-            <TermCourses courses={p.courses} terms={p.requestTerms} />
+            <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} />
           </div>
         )}
         {s.id === 5 && s.status === 'current' && (

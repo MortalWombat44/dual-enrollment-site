@@ -8,9 +8,10 @@ import { hashPassword, verifyPassword } from './password';
 export async function login(formData: FormData) {
   const email = String(formData.get('email') || '').trim();
   const password = String(formData.get('password') || '');
-  const u = db().prepare("SELECT id, role, password_hash, status FROM users WHERE email = ?").get(email) as
-    | { id: number; role: Role; password_hash: string | null; status: string }
+  const u = db().prepare("SELECT id, role, password_hash, status, disabled FROM users WHERE email = ?").get(email) as
+    | { id: number; role: Role; password_hash: string | null; status: string; disabled: number }
     | undefined;
+  if (u?.disabled && verifyPassword(password, u.password_hash)) redirect('/login?error=disabled&email=' + encodeURIComponent(email));
   if (!u || u.status !== 'active' || !verifyPassword(password, u.password_hash)) {
     redirect('/login?error=1&email=' + encodeURIComponent(email));
   }
@@ -27,7 +28,7 @@ export async function acceptInvite(formData: FormData) {
   const token = String(formData.get('token') || '');
   const password = String(formData.get('password') || '');
   const confirm = String(formData.get('confirm') || '');
-  const u = db().prepare("SELECT id, role FROM users WHERE invite_token = ? AND status = 'invited'").get(token) as
+  const u = db().prepare("SELECT id, role FROM users WHERE invite_token = ? AND status = 'invited' AND disabled = 0").get(token) as
     | { id: number; role: Role }
     | undefined;
   if (!u) redirect('/login?error=invite');

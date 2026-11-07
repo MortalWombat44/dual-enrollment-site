@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { addUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
+import { addUser, setUserDisabled, updateAdmin, updateStaffType } from '@/lib/admin-actions';
 import { activeTerms } from '@/lib/workflow';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
 import { AddUserDialog } from '@/components/AddUserDialog';
@@ -17,13 +17,14 @@ const ERRORS: Record<string, string> = {
   name: 'Enter a first and last name.', email: 'Enter a valid email.', role: 'Pick a role. Parents are invited by their student from the consent step.',
   school: 'Pick a school.', exists: 'Someone already has that email.',
   self: "You can't remove your own super admin access.",
+  self_disable: "You can't disable your own account.",
 };
 
 const STAFF_LABEL: Record<string, string> = { counselor: 'Counselor', admin: 'Admin', teacher: 'Teacher', other: 'Other' };
 
-type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; staff_type: string | null };
+type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; staff_type: string | null; disabled: number };
 
-export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string }> }) {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
   const role = ROLE_TABS.some(([r]) => r === sp.role) ? sp.role! : '';
@@ -33,7 +34,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   if (role) { where.push('u.role = ?'); args.push(role); }
   if (q) { where.push("(u.first_name || ' ' || u.last_name LIKE ? OR u.email LIKE ?)"); args.push(`%${q}%`, `%${q}%`); }
   const rows = db().prepare(
-    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.staff_type, s.name AS school
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.staff_type, u.disabled, s.name AS school
      FROM users u LEFT JOIN schools s ON s.id = u.school_id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY u.created_at DESC, u.id DESC LIMIT 200`).all(...args) as Row[];
@@ -49,11 +50,12 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
     primaryOf.set(r.admin_id, [...(primaryOf.get(r.admin_id) ?? []), r.school_id]);
   }
   const short = (name: string) => name.replace(' High School', ' HS');
+  const backUrl = '/admin/users' + (role || q ? '?' + new URLSearchParams({ ...(role ? { role } : {}), ...(q ? { q } : {}) }) : '');
 
   return (
     <AdminShell me={me} current="users">
       <AdminHead title="Users" action={<Link href="/admin/users?add=1" className="btn btn-primary btn-wide">Add user <span>+</span></Link>} />
-      <Flash msg={sp.updated ? 'Admin access updated.' : null} />
+      <Flash msg={sp.updated ? 'Saved.' : sp.disabled ? 'Account disabled. They have been signed out and cannot sign in.' : sp.enabled ? 'Account enabled. They can sign in again.' : null} />
       <Flash error msg={!sp.add && sp.error ? ERRORS[sp.error] : null} />
       {invited && (
         <div className="flash pad-sm" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -124,12 +126,19 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                 </td>
                 <td>{u.role === 'admin' ? 'Shasta College' : u.school ?? '—'}</td>
                 <td>
-                  {u.status === 'active' ? <span className="tag tag-accent">Active</span> : (
-                    <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                      <span className="tag tag-neutral">Invited</span>
-                      <Link href={`/admin/users?invited=${u.id}`} style={{ fontSize: 12 }}>Invite link</Link>
-                    </span>
-                  )}
+                  <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {u.disabled ? <span className="tag" style={{ background: '#fdecea', color: '#6b1a12' }}>Disabled</span>
+                      : u.status === 'active' ? <span className="tag tag-accent">Active</span>
+                      : <><span className="tag tag-neutral">Invited</span><Link href={`/admin/users?invited=${u.id}`} style={{ fontSize: 12 }}>Invite link</Link></>}
+                    {u.id !== me.id && (
+                      <form action={setUserDisabled}>
+                        <input type="hidden" name="id" value={u.id} />
+                        <input type="hidden" name="disable" value={u.disabled ? '0' : '1'} />
+                        <input type="hidden" name="back" value={backUrl} />
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 4px', color: u.disabled ? 'var(--color-accent-700)' : '#b3261e' }}>{u.disabled ? 'Enable' : 'Disable'}</button>
+                      </form>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}

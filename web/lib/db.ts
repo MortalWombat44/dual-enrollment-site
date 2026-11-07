@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_college_counselor INTEGER NOT NULL DEFAULT 0,
   staff_type TEXT CHECK (staff_type IN ('counselor','admin','teacher','other')), -- high school staff only, for record keeping
   share_with_parents INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0, -- super admins can switch off access
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS parent_links (
@@ -60,7 +61,8 @@ CREATE TABLE IF NOT EXISTS terms (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   registration_opens TEXT NOT NULL,
-  is_current INTEGER NOT NULL DEFAULT 0
+  is_current INTEGER NOT NULL DEFAULT 0,
+  summer INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS enrollments (
   student_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -214,6 +216,7 @@ function seed(d: DatabaseSync) {
   // Two terms open at once: Spring (Dec 2, 8:00 AM PT) and Summer (Apr 12, 8:00 AM PT).
   d.prepare("INSERT INTO terms (id, name, registration_opens, is_current) VALUES (1, 'Spring 2027', '2026-12-02T16:00:00Z', 1)").run();
   d.prepare("INSERT INTO terms (id, name, registration_opens, is_current) VALUES (2, 'Summer 2027', '2027-04-12T15:00:00Z', 1)").run();
+  d.prepare('UPDATE terms SET summer = 1 WHERE id = 2').run();
 
   const schools: [string, string, 'CCAP' | 'NON_CCAP', string | null, string | null][] = [
     ['Anderson High School', 'Anderson Union HSD', 'CCAP', 'CCAP-AUHSD-2025', '2028-06-30'],
@@ -380,6 +383,7 @@ export function cryptoToken() {
 /** Adds columns introduced after a database was first created. */
 function migrate(d: DatabaseSync) {
   const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('share_with_parents')) {
     d.exec('ALTER TABLE users ADD COLUMN share_with_parents INTEGER NOT NULL DEFAULT 0');
   }
@@ -394,6 +398,11 @@ function migrate(d: DatabaseSync) {
   }
   if (!cols.includes('is_college_counselor')) {
     d.exec('ALTER TABLE users ADD COLUMN is_college_counselor INTEGER NOT NULL DEFAULT 0');
+  }
+  const termCols = (d.prepare('PRAGMA table_info(terms)').all() as { name: string }[]).map((c) => c.name);
+  if (!termCols.includes('summer')) {
+    d.exec('ALTER TABLE terms ADD COLUMN summer INTEGER NOT NULL DEFAULT 0');
+    d.exec("UPDATE terms SET summer = 1 WHERE name LIKE '%summer%'");
   }
   const reqCols = (d.prepare('PRAGMA table_info(course_requests)').all() as { name: string }[]).map((c) => c.name);
   if (!reqCols.includes('term_id')) d.exec('ALTER TABLE course_requests ADD COLUMN term_id INTEGER REFERENCES terms(id)');

@@ -65,13 +65,14 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 
 ## Terms, accounts and flags
 
-- **Terms:** a super admin can have several terms open at once. Students pick a term for every class they request, from the terms with **registration allowed**. The unit limit is per term. If registration is turned off for a term, classes already in it are flagged to the student, counselor and the admin clearing units. The Register step follows the earliest registration date among the student's terms.
+- **Terms:** a super admin can have several terms open at once. Students pick a term for every class they request, from the terms with **registration allowed**. Usual unit limits are per term: CCAP students 15; non-CCAP students 11, or 7 in a term marked Summer on the Terms page. Students are never blocked from going over; they, their counselor and the admin clearing units see a note (limits live in `lib/constants.ts`). If registration is turned off for a term, classes already in it are flagged to the student, counselor and the admin clearing units. The Register step follows the earliest registration date among the student's terms.
 - **Sign-up:** students create their own account at `/signup` and pick their high school. The Shasta College ID is optional there and can be added later in Account.
 - **Shared IDs:** a Shasta College ID on more than one student account is flagged in the admin Students page (Shared IDs tab). Admins can correct the ID from the side panel.
 - **High school changes:** students request a change from Account; admins approve (moves the student) or decline it from the School changes tab.
 - **Primary schools:** super admins tick each admin's primary schools under Users. Those students sort first in that admin's queue and drive their Reports page.
 - **High School Staff:** the high school role (shown as High School Staff) has a record-keeping type: Counselor, Admin, Teacher or Other. All types have the same access.
 - **Parent consent is one-time:** once signed it covers future terms. Reopening earlier steps keeps it; only reopening the Parent consent step itself removes it (e.g. if the parent revokes). Parents see a note with the revoke email, which is still a placeholder: set `CONSENT_REVOKE_EMAIL` in `lib/constants.ts`.
+- **Disabling accounts:** super admins can disable or re-enable any user from Users (not their own). A disabled user is signed out everywhere and can't sign in or use an invite link.
 - **Seeded named accounts** (`ensureAccounts` in `lib/db.ts`) are created on every fresh database, only if missing.
 
 ## Workflow rules

@@ -101,7 +101,8 @@ export async function saveTerm(formData: FormData) {
   if (!name || !iso) redirect(`/admin/terms?error=fields&term=${id}`);
   // Keep at least one active term so new students always have somewhere to go.
   if (!active && !db().prepare('SELECT 1 FROM terms WHERE is_current = 1 AND id != ?').get(id)) redirect(`/admin/terms?error=last&term=${id}`);
-  db().prepare('UPDATE terms SET name = ?, registration_opens = ?, is_current = ? WHERE id = ?').run(name, iso, active, id);
+  const summer = formData.get('summer') === 'on' ? 1 : 0;
+  db().prepare('UPDATE terms SET name = ?, registration_opens = ?, is_current = ?, summer = ? WHERE id = ?').run(name, iso, active, summer, id);
   redirect(`/admin/terms?saved=${id}`);
 }
 
@@ -111,7 +112,8 @@ export async function addTerm(formData: FormData) {
   const iso = fromPacificInput(String(formData.get('opens') || ''));
   if (!name || !iso) redirect('/admin/terms?error=fields');
   if (db().prepare('SELECT 1 FROM terms WHERE name = ?').get(name)) redirect('/admin/terms?error=exists');
-  const id = Number(db().prepare('INSERT INTO terms (name, registration_opens, is_current) VALUES (?,?,1)').run(name, iso).lastInsertRowid);
+  const summer = formData.get('summer') === 'on' ? 1 : 0;
+  const id = Number(db().prepare('INSERT INTO terms (name, registration_opens, is_current, summer) VALUES (?,?,1,?)').run(name, iso, summer).lastInsertRowid);
   redirect(`/admin/terms?saved=${id}`);
 }
 
@@ -140,4 +142,19 @@ export async function updateStaffType(formData: FormData) {
   const id = Number(formData.get('id'));
   db().prepare("UPDATE users SET staff_type = ? WHERE id = ? AND role = 'counselor'").run(staffTypeOf(formData), id);
   redirect('/admin/users?role=counselor&updated=' + id);
+}
+
+/** Super admin: switch a user's access off (signs them out everywhere) or back on. */
+export async function setUserDisabled(formData: FormData) {
+  const me = await requireAdmin('super');
+  const id = Number(formData.get('id'));
+  const disable = formData.get('disable') === '1';
+  const back = String(formData.get('back') || '/admin/users');
+  const safeBack = back.startsWith('/admin/users') ? back : '/admin/users';
+  if (id === me.id) redirect(safeBack + (safeBack.includes('?') ? '&' : '?') + 'error=self_disable');
+  tx(() => {
+    db().prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disable ? 1 : 0, id);
+    if (disable) db().prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+  });
+  redirect(safeBack + (safeBack.includes('?') ? '&' : '?') + (disable ? 'disabled=' : 'enabled=') + id);
 }
