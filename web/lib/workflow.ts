@@ -341,9 +341,27 @@ export function currentClassYear(now = new Date()): number {
   const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' }).format(now).split('-').map(Number);
   return m >= 7 ? y + 1 : y;
 }
-/** "Class of 2027 · Grade 12" (grade worked out from the graduation year). */
-export function classLabel(u: { grad_year: number | null; grade: number | null }): string {
-  if (!u.grad_year) return u.grade ? `Grade ${u.grade}` : 'Class not set';
-  const grade = 12 - (u.grad_year - currentClassYear());
-  return `Class of ${u.grad_year}` + (grade > 12 ? ' · Graduated' : grade >= 9 ? ` · Grade ${grade}` : '');
+type GradeInfo = { grad_year: number | null; grade: number | null; grade_confirmed_year?: number | null };
+
+/** Grades students can pick. We've had 5th graders enroll, so it goes all the way down. */
+export const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+
+/** This school year's grade: what the student confirmed this year, otherwise worked out from their graduation year. */
+export function currentGrade(u: GradeInfo): number | null {
+  if (u.grade && u.grade_confirmed_year === currentClassYear()) return u.grade;
+  if (u.grad_year) return 12 - (u.grad_year - currentClassYear());
+  return u.grade;
+}
+/** 8th grade or below: tagged as a young student until they reach 9th grade. */
+export const isYoung = (u: GradeInfo) => { const g = currentGrade(u); return g !== null && g <= 8; };
+/** After July 1 each year, students confirm their graduation year and grade on first sign-in. */
+export const needsGradeConfirm = (u: { role: string } & GradeInfo) => u.role === 'student' && u.grade_confirmed_year !== currentClassYear();
+
+/** "Class of 2027 · 12th grade". */
+export function classLabel(u: GradeInfo): string {
+  const g = currentGrade(u);
+  const grade = g === null ? '' : g > 12 ? 'Graduated' : g < 1 ? '' : `${ordinal(g)} grade`;
+  if (!u.grad_year) return grade || 'Class not set';
+  return `Class of ${u.grad_year}` + (grade ? ` · ${grade}` : '');
 }

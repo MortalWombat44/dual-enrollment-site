@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { classLabel, allTerms, nextRegistration, daysSince, openSchoolChange, sharedStudentIds, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openSchoolChange, sharedStudentIds, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
   adminAddCourse, adminCompleteStep, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
@@ -135,6 +135,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                   return [header,
                     <tr key={p.student.id} className={sel?.student.id === p.student.id ? 'sel' : undefined}>
                       <td><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong>
+                        {isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}
                         {p.student.student_number && shared.has(p.student.student_number) && <span className="tag" style={{ marginLeft: 6, background: '#fdecea', color: '#6b1a12' }}>Shared ID</span>}
                       </Link></td>
                       <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
@@ -186,7 +187,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div className="pad-sm" style={{ padding: '24px 32px', borderBottom: '2px solid var(--color-divider)' }}>
         <div className="kicker accent700">{p.next ? `Step ${pad(p.next.num)} · ${p.next.short}` : 'All steps done'}</div>
-        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}</div>
+        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}{isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}</div>
         <div style={{ fontSize: 14, marginTop: 2 }}>{p.termLabel} · {p.school.name} · {classLabel(p.student)} · ID {p.student.student_number ?? '—'}</div>
       </div>
 
@@ -305,9 +306,13 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
 
       <form className="pad-sm" style={section}>
         <Hidden p={p} keep={keep} />
-        <div className="kicker">Graduation year</div>
+        <div className="kicker">Grade and graduation year</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input name="grad_year" type="number" min={2000} max={2100} className="input" defaultValue={p.student.grad_year ?? ''} aria-label="Graduation year" style={{ width: 140 }} />
+          <select name="grade" className="input" defaultValue={currentGrade(p.student) ?? ''} aria-label="Grade" style={{ width: 140 }}>
+            <option value="">Grade…</option>
+            {GRADES.map((g) => <option key={g} value={g}>{ordinal(g)} grade</option>)}
+          </select>
+          <input name="grad_year" type="number" min={2000} max={2100} className="input" defaultValue={p.student.grad_year ?? ''} aria-label="Graduation year" style={{ width: 120 }} />
           <button formAction={setGradYear} className="btn btn-secondary">Save</button>
         </div>
       </form>

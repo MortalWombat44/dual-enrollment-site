@@ -16,6 +16,7 @@ export type User = {
   title: string | null;
   grade: number | null;
   grad_year: number | null;
+  grade_confirmed_year: number | null;
   retired_at: string | null;
   student_number: string | null;
   counselor_id: number | null;
@@ -58,7 +59,7 @@ export async function currentUser(): Promise<User | null> {
   if (!token) return null;
   const row = db()
     .prepare(
-      `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.grad_year, u.retired_at, u.student_number, u.counselor_id, u.admin_level, u.is_college_counselor
+      `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.grad_year, u.grade_confirmed_year, u.retired_at, u.student_number, u.counselor_id, u.admin_level, u.is_college_counselor
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ? AND s.expires_at > ? AND u.disabled = 0`,
     )

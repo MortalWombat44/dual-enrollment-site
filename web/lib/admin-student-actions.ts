@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
 import { db, tx } from './db';
-import { completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
+import { currentClassYear, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
 function back(formData: FormData, extra: Record<string, string> = {}) {
@@ -155,7 +155,13 @@ export async function adminSetCourseTerm(formData: FormData) {
 export async function setGradYear(formData: FormData) {
   const { studentId } = await load(formData);
   const y = Number(formData.get('grad_year'));
+  const grade = Number(formData.get('grade'));
   if (!Number.isInteger(y) || y < 2000 || y > 2100) redirect(back(formData));
-  db().prepare('UPDATE users SET grad_year = ? WHERE id = ?').run(y, studentId);
+  if (GRADES.includes(grade)) {
+    // An admin setting the grade counts as this year's confirmation.
+    db().prepare('UPDATE users SET grad_year = ?, grade = ?, grade_confirmed_year = ? WHERE id = ?').run(y, grade, currentClassYear(), studentId);
+  } else {
+    db().prepare('UPDATE users SET grad_year = ? WHERE id = ?').run(y, studentId);
+  }
   redirect(back(formData, { done: 'grad_saved' }));
 }

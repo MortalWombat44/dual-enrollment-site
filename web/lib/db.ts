@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS users (
   disabled INTEGER NOT NULL DEFAULT 0, -- super admins can switch off access
   retired_at TEXT, -- set when retired by graduation year (also disabled)
   grad_year INTEGER, -- students: high school graduation year
+  grade_confirmed_year INTEGER, -- the school year (by its June) the student last confirmed grade + grad year
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS parent_links (
@@ -402,6 +403,7 @@ function seed(d: DatabaseSync) {
 
   // Graduation years (2026–27 school year: seniors are the class of 2027), plus alumni to retire.
   d.exec("UPDATE users SET grad_year = 2027 + (12 - grade) WHERE role = 'student' AND grade IS NOT NULL");
+  d.prepare("UPDATE users SET grade_confirmed_year = ? WHERE role = 'student' AND grade IS NOT NULL").run(schoolYearEnd());
   for (const [f, l, year] of [['Grace', 'Holt', 2022], ['Owen', 'Price', 2022], ['Lily', 'Shaw', 2023]] as [string, string, number][]) {
     const id = user(f, l, `${f.toLowerCase()}.${l.toLowerCase()}@alumni.example.org`, 'student', enterprise, { counselor: alvarez });
     d.prepare('UPDATE users SET grad_year = ? WHERE id = ?').run(year, id);
@@ -434,6 +436,11 @@ function migrate(d: DatabaseSync) {
   const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('retired_at')) d.exec('ALTER TABLE users ADD COLUMN retired_at TEXT');
+  if (!cols.includes('grade_confirmed_year')) {
+    d.exec('ALTER TABLE users ADD COLUMN grade_confirmed_year INTEGER');
+    // Students already here count as confirmed for this school year; they're asked again next July.
+    d.prepare("UPDATE users SET grade_confirmed_year = ? WHERE role = 'student' AND grade IS NOT NULL").run(schoolYearEnd());
+  }
   // GPA is no longer kept on student accounts.
   if (cols.includes('gpa')) d.exec('UPDATE users SET gpa = NULL WHERE gpa IS NOT NULL');
   if (!cols.includes('grad_year')) {
@@ -487,3 +494,9 @@ function migrate(d: DatabaseSync) {
 /** Steps in workflow order (step ids aren't in order, since Clear units was added later). */
 export const STEP_ORDER = STEP_DEFS.map((s) => s.id);
 export const stepIndex = (id: number) => STEP_ORDER.indexOf(id);
+
+/** The June that ends the current school year (Pacific time). Kept here so db.ts doesn't import workflow.ts. */
+function schoolYearEnd(): number {
+  const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit' }).format(new Date()).split('-').map(Number);
+  return m >= 7 ? y + 1 : y;
+}

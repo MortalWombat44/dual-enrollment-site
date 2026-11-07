@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireRole } from './auth';
 import { cryptoToken, db, tx } from './db';
-import { activeTerms, completeStep, getProgress, schoolCourses } from './workflow';
+import { activeTerms, completeStep, currentClassYear, getProgress, GRADES, schoolCourses } from './workflow';
 
 
 async function stepFor(stepId: number, allowed: string[]) {
@@ -111,4 +111,15 @@ export async function setMyStudentNumber(formData: FormData) {
   if (num && !/^[A-Za-z0-9-]+$/.test(num)) redirect('/student/account?error=id');
   db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
   redirect('/student/account?saved=id');
+}
+
+/** Yearly check (after July 1): the student confirms their graduation year and grade. */
+export async function confirmGrade(formData: FormData) {
+  const me = await requireRole('student');
+  const grade = Number(formData.get('grade'));
+  const gradYear = Number(formData.get('grad_year'));
+  const thisClass = currentClassYear();
+  if (!GRADES.includes(grade) || !Number.isInteger(gradYear) || gradYear < thisClass || gradYear > thisClass + 12) redirect('/confirm-grade?error=1');
+  db().prepare('UPDATE users SET grade = ?, grad_year = ?, grade_confirmed_year = ? WHERE id = ?').run(grade, gradYear, thisClass, me.id);
+  redirect('/student');
 }

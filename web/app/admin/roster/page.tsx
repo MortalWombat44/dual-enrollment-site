@@ -87,7 +87,7 @@ function ClassBlock({ c, nested }: { c: RosterClass; nested?: boolean }) {
           <tbody>
             {c.students.map((s) => (
               <tr key={s.id}>
-                <td><Link href={`/admin/students?tab=all&student=${s.id}`}><strong>{s.name}</strong></Link></td>
+                <td><Link href={`/admin/students?tab=all&student=${s.id}`}><strong>{s.name}</strong></Link>{s.young && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}</td>
                 <td>{s.gradYear ?? '—'}</td>
                 <td>{s.term ?? '—'}</td>
                 <td>

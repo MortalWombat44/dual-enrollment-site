@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { currentUser, HOME } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { signUp } from '@/lib/session-actions';
-import { currentClassYear } from '@/lib/workflow';
+import { currentClassYear, GRADES, ordinal } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,16 +15,17 @@ const ERRORS: Record<string, string> = {
   id: 'A Shasta College ID uses only letters, numbers and dashes.',
   exists: 'There is already an account with that email. Sign in instead.',
   grad: 'Pick your high school graduation year.',
+  grade: 'Pick the grade you are in.',
 };
 
-type SP = { error?: string; first?: string; last?: string; email?: string; school?: string; id?: string; grad?: string };
+type SP = { error?: string; first?: string; last?: string; email?: string; school?: string; id?: string; grad?: string; grade?: string };
 
 export default async function SignUp({ searchParams }: { searchParams: Promise<SP> }) {
   const u = await currentUser();
   if (u) redirect(HOME[u.role]);
   const sp = await searchParams;
   const schools = db().prepare('SELECT id, name, district FROM schools ORDER BY name').all() as { id: number; name: string; district: string }[];
-  const gradYears = Array.from({ length: 5 }, (_, i) => currentClassYear() + i);
+  const gradYears = Array.from({ length: 13 }, (_, i) => currentClassYear() + i);
   return (
     <div className="frame">
       <div className="topbar"><Link href="/login" className="brand unlink"><div className="brand-mark" /><div className="brand-name">Shasta College</div><div className="brand-sep only-desktop" /><div className="only-desktop" style={{ fontSize: 14 }}>Dual Enrollment</div></Link></div>
@@ -46,6 +47,13 @@ export default async function SignUp({ searchParams }: { searchParams: Promise<S
             <select id="school" name="school" className="input" required defaultValue={sp.school ?? ''}>
               <option value="" disabled>Pick your high school…</option>
               {schools.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.district}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="grade">Grade you're in this school year</label>
+            <select id="grade" name="grade" className="input" required defaultValue={sp.grade ?? ''} style={{ maxWidth: 360 }}>
+              <option value="" disabled>Pick your grade…</option>
+              {GRADES.map((g) => <option key={g} value={g}>{ordinal(g)} grade</option>)}
             </select>
           </div>
           <div className="field">

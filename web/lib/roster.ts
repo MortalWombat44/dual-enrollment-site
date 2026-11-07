@@ -1,9 +1,9 @@
 import 'server-only';
 import { db } from './db';
-import { getProgress, pad, type Course } from './workflow';
+import { getProgress, isYoung, pad, type Course } from './workflow';
 
 export type RosterStudent = {
-  id: number; name: string; gradYear: number | null; term: string | null;
+  id: number; name: string; gradYear: number | null; term: string | null; young: boolean;
   step: string; // "05 Clear units" or "Done"
   stepStatus: string; // in_review, current, waiting_parent, …
 };
@@ -35,6 +35,7 @@ export function schoolRoster(schoolId: number, termId?: number): RosterClass[] {
       id: p.student.id,
       name: `${p.student.first_name} ${p.student.last_name}`,
       gradYear: p.student.grad_year,
+      young: isYoung(p.student),
       term: r.term,
       step: p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done',
       stepStatus: p.next?.status ?? 'complete',

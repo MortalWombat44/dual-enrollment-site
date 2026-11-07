@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
-import { classLabel, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
+import { classLabel, isYoung, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
 import { approve, sendBack } from '@/lib/counselor-actions';
 import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
@@ -74,7 +74,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
                 const link = href({ student: p.student.id });
                 return (
                   <tr key={p.student.id} className={sel?.student.id === p.student.id ? 'sel' : undefined}>
-                    <td><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong></Link></td>
+                    <td><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong>{isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}</Link></td>
                     <td><Link className="rowa" href={link}>{p.student.grad_year ?? p.student.grade ?? '—'}</Link></td>
                     <td><Link className="rowa" href={link}>{p.courses.map((c) => c.code).join(', ') || '—'}</Link></td>
                     <td><Link className="rowa" href={link}>{p.complete} / {p.total}</Link></td>
