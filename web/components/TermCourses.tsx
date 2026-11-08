@@ -36,6 +36,9 @@ export function TermCourses({ courses, terms, designation, showUnits = true, com
                   {designation === 'NON_CCAP' && (c.hs_status === 'approved'
                     ? <span className="tag tag-accent" style={{ marginLeft: 6, fontSize: 10 }}>HS approved {fmt(c.hs_at)}</span>
                     : <span className="tag" style={{ marginLeft: 6, fontSize: 10, background: '#fff4e0', color: '#8a4b00' }}>Awaiting HS approval</span>)}
+                  {!!c.needs_prereq && (c.prereq_status === 'approved'
+                    ? <span className="tag tag-accent" style={{ marginLeft: 6, fontSize: 10 }}>Prerequisite approved</span>
+                    : <span className="tag" style={{ marginLeft: 6, fontSize: 10, background: '#fff4e0', color: '#8a4b00' }}>Prerequisite review</span>)}
                 </span>
                 <span className="ink60">{c.units} units{courseWhen(c) ? ` · ${courseWhen(c)}` : ''}</span>
               </div>

@@ -293,3 +293,13 @@ export async function submitAffidavit(formData: FormData) {
   await notifyLeads('homeschool', me.id, `${me.first_name} ${me.last_name} uploaded a Private School Affidavit to review.`);
   redirect('/student/steps/11');
 }
+
+/** A student realizes a class has a prerequisite they didn't mark: send it to prerequisite review (any time). */
+export async function studentRequestPrereq(formData: FormData) {
+  const me = await requireRole('student');
+  const courseId = Number(formData.get('courseId'));
+  const termId = Number(formData.get('termId')) || null;
+  const r = db().prepare(`UPDATE course_requests SET prereq_flag = 1, prereq_flagged_by = ?, prereq_status = NULL, prereq_by = NULL, prereq_at = NULL
+    WHERE student_id = ? AND course_id = ? AND term_id IS ? AND prereq_flag = 0 AND archived_at IS NULL`).run(me.id, me.id, courseId, termId);
+  redirect(`/student/steps/2?prereq=${Number(r.changes) ? 'sent' : 'already'}#more`);
+}

@@ -22,8 +22,9 @@ export function stepSub(p: StudentProgress, s: StudentStep): string {
     case 'changes':
       return p.changeBy === 'college' ? 'Shasta College asked for changes' : 'Your high school asked for changes';
     case 'scheduled':
-      return `Opens ${fmt(p.term.registration_opens)}`;
+      return s.id === 5 ? `Ready to register · opens ${fmt(p.term.registration_opens)}` : `Opens ${fmt(p.term.registration_opens)}`;
     case 'current':
+      if (s.id === 5) return s.overdue ? 'Overdue: register in myShasta now' : `Registration open for ${p.term.name}`;
       return s.mode === 'optional' ? 'Optional · ready when you are' : 'Ready to start';
     case 'locked':
       if (s.id === 5) return `Opens ${fmt(p.term.registration_opens)}`;
@@ -38,8 +39,11 @@ export function stepTag(s: StudentStep): { label: string; kind: 'accent' | 'outl
     case 'in_review': return { label: 'In review', kind: 'accent' };
     case 'waiting_parent': return { label: 'Waiting on parent', kind: 'accent' };
     case 'changes': return { label: 'Changes requested', kind: 'accent' };
-    case 'current': return { label: s.mode === 'optional' ? 'Optional' : 'Start', kind: 'accent' };
-    case 'scheduled':
+    case 'current':
+      if (s.id === 5 && s.overdue) return { label: 'Overdue', kind: 'accent' };
+      return { label: s.mode === 'optional' ? 'Optional' : 'Start', kind: 'accent' };
+    case 'scheduled': if (s.id === 5) return { label: 'Ready to register', kind: 'outline' };
+    // falls through
     case 'locked': return { label: 'Locked', kind: 'outline' };
   }
 }
@@ -63,8 +67,9 @@ export function dashboardLine(p: StudentProgress): string {
       return `Your high school is reviewing your classes now. Check with your high school counselor if you have questions.`;
     case 'waiting_parent': return p.parents.length ? 'Your parent or guardian needs to sign the consent form before you can pick courses.' : 'Invite your parent or guardian to sign the consent form. You can pick courses once they do.';
     case 'changes': return `${p.changeBy === 'college' ? 'Shasta College' : 'Your high school'} asked for a change to your courses. Update them and resubmit.`;
-    case 'scheduled': return `You're cleared to register. Registration opens ${fmt(p.term.registration_opens)}.`;
+    case 'scheduled': return `You're ready to register. Registration for ${p.term.name} opens ${fmt(p.term.registration_opens)}.`;
     default:
+      if (n.id === 5 && n.overdue) return `Your registration for ${p.term.name} is overdue. Register for your classes in myShasta now, then confirm it here.`;
       return p.complete === 0 ? 'Start by applying to Shasta College on CCCApply. It takes about 20 minutes.' : `Next up: ${n.name.toLowerCase()}.`;
   }
 }
@@ -84,7 +89,7 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
         ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online.`
         : `${displayName(p.parents[0])} hasn't accepted your invite yet.`;
     case 7: return `Shasta College is checking that ${list} fit your unit limit. Usually 1–2 days.`;
-    case 8: return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.prerequisite).map((c) => c.code).join(', ') || 'your classes'}.`;
+    case 8: return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => c.code).join(', ') || 'your classes'}.`;
     case 11: return s.status === 'in_review' ? 'Shasta College is reviewing your Private School Affidavit.' : 'Upload the Private School Affidavit (you or your parent). Shasta College reviews it.';
     case 9: return 'Students in 8th grade and below send a recent report card or transcript and a letter from their principal.';
     case 10: return `A Shasta College counselor reviews your documents for ${list}, then Shasta College makes the final decision.`;

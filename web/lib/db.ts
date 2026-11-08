@@ -299,7 +299,7 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
   { id: 9, name: 'Young student documents', short: 'Young student documents', description: 'Report card or transcript, and a letter from the principal (8th grade and below only)' },
   { id: 10, name: 'Young student review', short: 'Young student review', description: 'A college counselor recommends, then a Young Student Approver decides (8th grade and below only)' },
   // Steps 7 and 8 were added later, so their ids are out of order: this array's order is the workflow order.
-  { id: 7, name: 'Clear units', short: 'Clear units', description: 'Shasta College checks the courses and unit load' },
+  { id: 7, name: 'College review & clear units', short: 'College review', description: 'Shasta College verifies the student in Colleague and clears the unit load' },
   { id: 8, name: 'Prerequisite review', short: 'Prerequisite review', description: 'A college counselor approves classes that have a prerequisite (only shown when one is requested)' },
   { id: 5, name: 'Register for classes', short: 'Register', description: 'Every student registers in myShasta once registration opens' },
   // Turned off for now. To bring it back, uncomment this line (its page and wording are still in the code):
@@ -694,8 +694,25 @@ function migrate(d: DatabaseSync) {
     approveFromStepFour(d);
   }
   const courseCols2 = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
+  // Concurrent classes students type in are stored as hidden courses (custom = 1), apart from the admin's list.
+  if (!courseCols2.includes('custom')) {
+    d.exec('ALTER TABLE courses ADD COLUMN custom INTEGER NOT NULL DEFAULT 0');
+    d.exec("UPDATE courses SET custom = 1 WHERE kind = 'ce' AND active = 0");
+  }
   if (!courseCols2.includes('offered_term_id')) d.exec('ALTER TABLE courses ADD COLUMN offered_term_id INTEGER REFERENCES terms(id) ON DELETE SET NULL');
   const reqCols2 = (d.prepare('PRAGMA table_info(course_requests)').all() as { name: string }[]).map((c) => c.name);
+  // Prerequisite review per request: a class can be flagged for review later (by an admin or the student).
+  if (!reqCols2.includes('prereq_status')) {
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_flag INTEGER NOT NULL DEFAULT 0');
+    d.exec("ALTER TABLE course_requests ADD COLUMN prereq_status TEXT CHECK (prereq_status IN ('approved'))");
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_by INTEGER');
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_at TEXT');
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_flagged_by INTEGER');
+    // Students whose prerequisite review was already done: their prerequisite classes count as approved.
+    d.exec(`UPDATE course_requests SET prereq_status = 'approved', prereq_at = (SELECT completed_at FROM step_progress p WHERE p.student_id = course_requests.student_id AND p.step_id = 8)
+      WHERE EXISTS (SELECT 1 FROM step_progress p WHERE p.student_id = course_requests.student_id AND p.step_id = 8 AND p.status = 'complete')
+        AND course_id IN (SELECT id FROM courses WHERE prerequisite IS NOT NULL)`);
+  }
   if (!reqCols2.includes('hs_signer_email')) d.exec('ALTER TABLE course_requests ADD COLUMN hs_signer_email TEXT'); // outside approver (unlisted school)
   if (!reqCols2.includes('archived_at')) {
     d.exec('ALTER TABLE course_requests ADD COLUMN archived_at TEXT');

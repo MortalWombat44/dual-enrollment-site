@@ -4,7 +4,7 @@ import { requireRole } from '@/lib/auth';
 import { activeTerms, archivedRequests, latestAffidavit, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
-import { addMoreClasses, addStudentId, submitAffidavit, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { addMoreClasses, addStudentId, studentRequestPrereq, submitAffidavit, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
 import { StudentIdForm } from '@/components/StudentIdForm';
 import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
@@ -27,10 +27,10 @@ const ERRORS: Record<string, string> = {
   ce: 'Each concurrent class needs a course code (like PSYC C1000) and units (for example 3 or 4).',
 };
 
-export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string; approver_link?: string; emailed?: string; help?: string }> }) {
+export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string; approver_link?: string; emailed?: string; help?: string; prereq?: string }> }) {
   const me = await requireRole('student');
   const { n } = await params;
-  const { error, invited, invite_error, added, approver_link, emailed, help } = await searchParams;
+  const { error, invited, invite_error, added, approver_link, emailed, help, prereq } = await searchParams;
   const p = getProgress(me.id);
   const s = p?.steps.find((x) => x.id === Number(n));
   if (!p || !s) notFound();
@@ -40,7 +40,7 @@ export default async function StepPage({ params, searchParams }: { params: Promi
     <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: '100vh', maxWidth: 1280, margin: '0 auto', boxShadow: '0 1px 3px rgba(0,0,0,.08)' }}>
       <Sidebar p={p} current={s.id} />
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} approverLink={approver_link} emailed={emailed === '1'} />}
+        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} prereq={prereq} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} approverLink={approver_link} emailed={emailed === '1'} />}
         <HelpBox studentId={p.student.id} back={`/student/steps/${s.id}`} status={help} />
         <div className="pad-sm" style={{ marginTop: 'auto', borderTop: '2px solid var(--color-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 48px', gap: 12, flexWrap: 'wrap' }}>
           {s.id === 3 && s.status === 'complete' ? (
@@ -123,7 +123,7 @@ function Cells({ cells }: { cells: [string, string, string][] }) {
   );
 }
 
-function CompleteView({ p, s, error, added }: { p: StudentProgress; s: StudentStep; error?: string; added?: string }) {
+function CompleteView({ p, s, error, added, prereq }: { p: StudentProgress; s: StudentStep; error?: string; added?: string; prereq?: string }) {
   const copy = completionCopy(p, s);
   const units = p.courses.reduce((n, c) => n + c.units, 0);
   const d = s.data ?? {};
@@ -159,7 +159,7 @@ function CompleteView({ p, s, error, added }: { p: StudentProgress; s: StudentSt
         </div>
       )}
       <Cells cells={cells} />
-      {s.id === 2 && <MoreClasses p={p} error={error} added={added} />}
+      {s.id === 2 && <MoreClasses p={p} error={error} added={added} prereq={prereq} />}
       <div className="pad-sm" style={{ padding: '32px 48px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <h4 style={{ margin: 0, fontSize: 15 }}>Included in your packet</h4>
         <PacketTable p={p} />
@@ -181,7 +181,8 @@ function ArchivedNotice({ studentId }: { studentId: number }) {
 }
 
 /** After the first course selection: request more classes any time (even while others are in review), or change them. */
-function MoreClasses({ p, error, added }: { p: StudentProgress; error?: string; added?: string }) {
+function MoreClasses({ p, error, added, prereq }: { p: StudentProgress; error?: string; added?: string; prereq?: string }) {
+  const noPrereq = p.courses.filter((c) => !c.needs_prereq);
   const terms = activeTerms();
   const base: Record<number, number> = {};
   for (const c of p.courses) if (c.term_id) base[c.term_id] = (base[c.term_id] ?? 0) + c.units;
@@ -204,6 +205,21 @@ function MoreClasses({ p, error, added }: { p: StudentProgress; error?: string; 
         />
         <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Request these classes <span>→</span></button></div>
       </form>
+      {prereq === 'sent' && <div className="flash" role="status">Sent to prerequisite review. A Shasta College counselor will check it.</div>}
+      {noPrereq.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '2px solid var(--color-divider)', paddingTop: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Missed a prerequisite?</div>
+          <div className="ink60" style={{ fontSize: 13 }}>If one of your classes has a prerequisite you didn&apos;t mark, send it to a Shasta College counselor for review.</div>
+          {noPrereq.map((c) => (
+            <form key={`${c.id}-${c.term_id}`} action={studentRequestPrereq} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: 14 }}>
+              <input type="hidden" name="courseId" value={c.id} />
+              <input type="hidden" name="termId" value={c.term_id ?? ''} />
+              <span><strong>{c.code}</strong> · {c.term_name}</span>
+              <button className="btn btn-ghost" style={{ color: 'var(--color-accent-700)', fontSize: 13 }}>This class has a prerequisite</button>
+            </form>
+          ))}
+        </div>
+      )}
       <form action={reopenCourseSelection} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', borderTop: '2px solid var(--color-divider)', paddingTop: 16 }}>
         <button className="btn btn-secondary">Change or remove classes</button>
         <span className="ink60" style={{ fontSize: 13 }}>Classes that are already approved stay approved. New or moved classes go through the reviews again.</span>
@@ -223,7 +239,7 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: 
   const live = s.status !== 'locked' && s.status !== 'scheduled';
   const body =
     s.status === 'locked' ? `Finish step ${pad(prevReq?.num ?? s.num - 1)}, ${prevReq?.short.toLowerCase() ?? 'the step before this one'}, first.` :
-    s.status === 'scheduled' ? `Registration for ${p.term.name} opens ${fmt(p.term.registration_opens, 'wmd')} at ${fmt(p.term.registration_opens, 'time')}.` :
+    s.status === 'scheduled' ? `You're ready to register. Registration for ${p.term.name} opens ${fmt(p.term.registration_opens, 'wmd')} at ${fmt(p.term.registration_opens, 'time')}.` :
     s.status === 'in_review' ? (
       s.id === 7 ? 'Shasta College is checking your courses and unit load. Usually 1–2 days.' :
       s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
@@ -269,8 +285,8 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: 
             )}
             <CoursePicker
               courses={schoolCourses(p.school.id)}
-              initial={openCourses.filter((c) => c.kind === 'de').map((c) => ({ id: c.id, term_id: c.term_id }))}
-              initialCe={openCourses.filter((c) => c.kind === 'ce').map((c) => ({ code: c.code, title: c.title === CE_DEFAULT_TITLE ? '' : c.title, units: String(c.units), term: c.term_id ?? 0, prereq: !!c.prerequisite }))}
+              initial={openCourses.filter((c) => !c.custom).map((c) => ({ id: c.id, term_id: c.term_id }))}
+              initialCe={openCourses.filter((c) => c.custom).map((c) => ({ code: c.code, title: c.title === CE_DEFAULT_TITLE ? '' : c.title, units: String(c.units), term: c.term_id ?? 0, prereq: !!c.prerequisite }))}
               terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy'), limit: unitLimit(p.school.designation, t.summer === 1) }))}
               ccap={p.school.designation === 'CCAP'}
               schoolName={p.school.name}
@@ -319,6 +335,11 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: 
         {s.id === 5 && p.registeredTermIds.length > 0 && s.status !== 'complete' && (
           <div style={{ fontSize: 14, color: 'var(--color-accent-700)', fontWeight: 700 }}>
             ✓ Registered for {p.requestTerms.filter((t) => p.registeredTermIds.includes(t.id)).map((t) => t.name).join(', ')}
+          </div>
+        )}
+        {s.id === 5 && s.overdue && (
+          <div style={{ fontSize: 15, borderLeft: '4px solid #b3261e', background: '#fdecea', color: '#6b1a12', padding: '12px 16px' }}>
+            <strong>Your registration is overdue.</strong> Registration for {p.term.name} opened on {fmt(p.term.registration_opens, 'mdy')}. Register for your classes in myShasta now, then confirm it below. If something is stopping you, use &ldquo;I need help&rdquo; at the bottom of this page.
           </div>
         )}
         {s.id === 5 && s.status === 'current' && (

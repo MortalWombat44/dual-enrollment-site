@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, adminFlagPrereq, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -18,23 +18,25 @@ import { primarySchoolIds } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'help' | 'units' | 'prereq' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
+type Tab = 'help' | 'overdue' | 'units' | 'prereq' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
 type SP = { link?: string; emailed?: string; classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const DONE: Record<string, string> = {
-  cleared: 'Units cleared. The student moves to the next step.',
+  cleared: 'Verified and units cleared. The student moves to the next step.',
   sent_back: 'Sent back. The student will see your note on Course selection.',
   prereq: 'Prerequisite decisions saved.',
   moved: 'Step marked complete.',
   reopened: 'Step reopened, along with every step after it.',
   course_added: 'Class added to the request.',
   affidavit_ok: 'Private School Affidavit approved.',
+  prereq_flagged: 'Sent to prerequisite review. A college counselor decides it (College review isn’t affected).',
+  prereq_unflagged: 'Flag removed.',
   nudged: 'Nudged. College counselors are notified, and the student is at the top of the Prerequisites queue, highlighted.',
   help_resolved: 'Help request resolved. The student sees your reply.',
   help_already: 'That help request was already resolved.',
   affidavit_declined: 'Affidavit declined. The student and parent see your note and can upload a new one.',
   young_rec: 'Recommendation saved. A Young Student Approver makes the final decision.',
-  young_approved: 'Approved. The student moves on to Clear units.',
+  young_approved: 'Approved. The student moves on to College review.',
   young_declined: 'Declined. The student sees your note on Course selection.',
   course_removed: 'Class removed from the request.',
   moved_school: 'Student moved to the new school.',
@@ -47,6 +49,7 @@ const DONE: Record<string, string> = {
   id_change_declined: 'ID change request declined.',
 };
 const ERR: Record<string, string> = {
+  verify: 'Check Program in SACP, Start date in RGPE and Cohort in STAL before clearing.',
   no_approver: 'This student has no high school approver email on file.',
   ce: 'A concurrent class needs a course code (like PSYC C1000) and units.',
   note: 'Add a note so the student knows what to change.',
@@ -67,9 +70,14 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   const termId = Number(sp.term) || 0;
   const schools = db().prepare('SELECT id, name FROM schools ORDER BY name').all() as { id: number; name: string }[];
   const schoolId = Number(sp.school) || 0;
+  // "My schools": the admin's primary schools.
+  const myIds = primarySchoolIds(me.id);
+  const mine = sp.school === 'mine' && myIds.length > 0;
+  const schoolFilter = mine ? `AND school_id IN (${myIds.map(() => '?').join(',')})` : schoolId ? 'AND school_id = ?' : '';
+  const schoolArgs = mine ? myIds : schoolId ? [schoolId] : [];
   const ids = (db()
-    .prepare(`SELECT id FROM users WHERE role = 'student' ${schoolId ? 'AND school_id = ?' : ''} ORDER BY last_name, first_name`)
-    .all(...(schoolId ? [schoolId] : [])) as { id: number }[]).map((r) => r.id);
+    .prepare(`SELECT id FROM users WHERE role = 'student' ${schoolFilter} ORDER BY last_name, first_name`)
+    .all(...schoolArgs) as { id: number }[]).map((r) => r.id);
   // A student is "in" a term if any of their classes is, or (no classes yet) it's their default term.
   const inTerm = (p: StudentProgress) => !termId || p.requestTerms.some((t) => t.id === termId) || (p.courses.length === 0 && p.term.id === termId);
   const all = ids.map(getProgress).filter((p): p is StudentProgress => !!p && inTerm(p));
@@ -82,12 +90,13 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     young: all.filter((p) => waitingOn(p, 10)),
     homeschool: all.filter((p) => waitingOn(p, 11)),
     help: all.filter((p) => helpOpen.has(p.student.id)),
+    overdue: all.filter((p) => !!p.steps.find((s) => s.id === 5)?.overdue),
     school: all.filter((p) => !!openSchoolChange(p.student.id)),
     idreq: all.filter((p) => !!openIdChange(p.student.id)),
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
     all,
   };
-  const tab: Tab = (['help', 'prereq', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
+  const tab: Tab = (['help', 'overdue', 'prereq', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
@@ -111,14 +120,14 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   const href = (o: Partial<{ tab: Tab; student: number }>) => {
     const u = new URLSearchParams();
     const t = o.tab ?? tab; if (t !== 'units') u.set('tab', t);
-    if (schoolId) u.set('school', String(schoolId));
+    if (mine) u.set('school', 'mine'); else if (schoolId) u.set('school', String(schoolId));
     if (termId) u.set('term', String(termId));
     if (sp.q) u.set('q', sp.q);
     if (o.student) u.set('student', String(o.student));
     const s = u.toString();
     return '/admin/students' + (s ? '?' + s : '');
   };
-  const keep = { tab: tab === 'units' ? '' : tab, school: schoolId ? String(schoolId) : '', term: termId ? String(termId) : '', q: sp.q ?? '' };
+  const keep = { tab: tab === 'units' ? '' : tab, school: mine ? 'mine' : schoolId ? String(schoolId) : '', term: termId ? String(termId) : '', q: sp.q ?? '' };
 
   return (
     <AdminShell me={me} current="students">
@@ -126,8 +135,9 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
         <div><div className="kicker accent700">{me.admin_level === 'super' ? 'Super admin' : 'College admin'}</div><h1>Students</h1></div>
         <form action="/admin/students" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {tab !== 'units' && <input type="hidden" name="tab" value={tab} />}
-          <select name="school" className="input" defaultValue={schoolId || ''} style={{ width: 200 }}>
+          <select name="school" className="input" defaultValue={mine ? 'mine' : schoolId || ''} style={{ width: 200 }}>
             <option value="">All schools</option>
+            {myIds.length > 0 && <option value="mine">My schools ({myIds.length})</option>}
             {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <select name="term" className="input" defaultValue={termId || ''} style={{ width: 160 }}>
@@ -146,7 +156,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
         : sp.done ? DONE[sp.done] : null} />
       <Flash error msg={sp.error ? ERR[sp.error] : null} />
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
-        <Stat label={primary.size ? `Clear units · ${groups.units.filter(isMine).length} at your schools` : 'Clear units · waiting on you'} value={String(groups.units.length)} hero />
+        <Stat label={primary.size ? `College review · ${groups.units.filter(isMine).length} at your schools` : 'College review · waiting on you'} value={String(groups.units.length)} hero />
         <Stat label="Prerequisite review" value={String(groups.prereq.length)} />
         <Stat label="Waiting on parent" value={String(waitingParent)} />
         <Stat label={`Next registration · ${term.name}`} value={fmt(term.registration_opens)} last />
@@ -157,7 +167,10 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
             {(groups.help.length > 0 || tab === 'help') && (
               <Link className="seg-opt" href={href({ tab: 'help' })} aria-current={tab === 'help'}>Help · {groups.help.length}</Link>
             )}
-            <Link className="seg-opt" href={href({ tab: 'units' })} aria-current={tab === 'units'}>Clear units · {groups.units.length}</Link>
+            {(groups.overdue.length > 0 || tab === 'overdue') && (
+              <Link className="seg-opt" href={href({ tab: 'overdue' })} aria-current={tab === 'overdue'}>Overdue registration · {groups.overdue.length}</Link>
+            )}
+            <Link className="seg-opt" href={href({ tab: 'units' })} aria-current={tab === 'units'}>College review · {groups.units.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'prereq' })} aria-current={tab === 'prereq'}>Prerequisites · {groups.prereq.length}</Link>
             {(groups.young.length > 0 || tab === 'young') && (
               <Link className="seg-opt" href={href({ tab: 'young' })} aria-current={tab === 'young'}>Young students · {groups.young.length}</Link>
@@ -193,7 +206,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                         <td style={bracket}><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong></Link></td>
                         <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
                         <td><Link className="rowa" href={link}>{p.student.email}</Link></td>
-                        <td><Link className="rowa" href={link}>{p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done'}</Link></td>
+                        <td><Link className="rowa" href={link} style={p.next?.overdue ? { color: '#b3261e', fontWeight: 700 } : undefined}>{stepOnLabel(p)}</Link></td>
                         <td><Link className="rowa" href={link}>{p.student.grad_year ?? '—'}</Link></td>
                       </tr>];
                   }
@@ -211,7 +224,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                       </Link></td>
                       <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
                       <td><Link className="rowa" href={link}>{p.courses.map((c) => c.code).join(', ') || '—'}</Link></td>
-                      <td><Link className="rowa" href={link}>{p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done'}</Link></td>
+                      <td><Link className="rowa" href={link} style={p.next?.overdue ? { color: '#b3261e', fontWeight: 700 } : undefined}>{stepOnLabel(p)}</Link></td>
                       <td><Link className="rowa" href={link}>{daysSince(waitingSince(p)) || '—'}</Link></td>
                     </tr>,
                   ];
@@ -256,7 +269,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   const nudge = s8?.status === 'in_review' ? openNudges().get(p.student.id) ?? null : null;
   // Marking a step complete while prerequisite review is still open skips the college counselor's review: warn first.
   const prereqOpen = !!s8 && s8.status !== 'complete';
-  const prereqClasses = p.courses.filter((c) => c.prerequisite).map((c) => `${c.code} (${c.term_name ?? 'no term'})`).join(', ');
+  const prereqClasses = p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => `${c.code} (${c.term_name ?? 'no term'})`).join(', ');
   const completeMessage = (s: { id: number; num: number; short: string }) => {
     const base = `Mark “${s.short}” complete for ${p.student.first_name}?`;
     if (!prereqOpen || s.num < s8!.num) return base;
@@ -275,7 +288,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div className="pad-sm" style={{ padding: '24px 32px', borderBottom: '2px solid var(--color-divider)' }}>
-        <div className="kicker accent700">{p.next ? `Step ${pad(p.next.num)} · ${p.next.short}` : 'All steps done'}</div>
+        <div className="kicker accent700">{p.next ? `Step ${stepOnLabel(p).replace(' ', ' · ')}` : 'All steps done'}</div>
         <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}{isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}</div>
         <div style={{ fontSize: 14, marginTop: 2 }}>{p.termLabel} · {p.school.name} · {classLabel(p.student)} · ID {p.student.student_number ?? '—'}</div>
         <StudentContact s={p.student} approver />
@@ -327,17 +340,28 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
           <Hidden p={p} keep={keep} />
           <input type="hidden" name="stepId" value={7} />
-          <div className="kicker accent700">Clear units</div>
+          <div className="kicker accent700">College review &amp; clear units</div>
           <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact />
           {p.school.designation === 'CCAP' && (
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
               <input type="checkbox" name="max_units" style={{ width: 18, height: 18, marginTop: 2, accentColor: 'var(--color-accent)' }} />
-              <span>Cleared for the maximum units for {p.requestTerms.map((t) => t.name).join(' and ') || 'this term'}. Classes added later in {p.requestTerms.length > 1 ? 'these terms' : 'this term'} won't come back to Clear units. <span className="ink60">(Staff only; not shown to the student.)</span></span>
+              <span>Cleared for the maximum units for {p.requestTerms.map((t) => t.name).join(' and ') || 'this term'}. Classes added later in {p.requestTerms.length > 1 ? 'these terms' : 'this term'} won't come back to College review. <span className="ink60">(Staff only; not shown to the student.)</span></span>
             </label>
           )}
+          <div className="kicker-sm" style={{ marginTop: 4 }}>Verify in Colleague</div>
+          <div className="field">
+            <label htmlFor="cr_sid">Shasta College ID (update it if it&apos;s wrong)</label>
+            <input id="cr_sid" name="student_number" className="input" required pattern="[A-Za-z0-9\-]{4,20}" defaultValue={p.student.student_number ?? ''} placeholder="No ID on file" style={{ maxWidth: 260 }} />
+          </div>
+          {([['v_sacp', 'Program in SACP'], ['v_rgpe', 'Start date in RGPE'], ['v_stal', 'Cohort in STAL']] as const).map(([name, label]) => (
+            <label key={name} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+              <input type="checkbox" name={name} required style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+              <span><strong>{label}</strong> <span className="ink60">(in Colleague)</span></span>
+            </label>
+          ))}
           <div className="field"><label htmlFor="n7">Note to student (required to send back)</label><textarea id="n7" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} /></div>
-          <button formAction={clearUnits} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Clear units <span>→</span></button>
-          <button formAction={sendBackToStudent} className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Send back to student</button>
+          <button formAction={clearUnits} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>All verified &amp; units cleared in Colleague <span>→</span></button>
+          <button formAction={sendBackToStudent} formNoValidate className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Send back to student</button>
         </form>
       )}
 
@@ -347,10 +371,10 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <input type="hidden" name="stepId" value={8} />
           <div className="kicker accent700">Prerequisite review</div>
           {!me.is_college_counselor && <div style={{ fontSize: 13 }}>Only admins designated as college counselors can approve or decline these.</div>}
-          {p.courses.filter((c) => c.prerequisite).map((c) => (
+          {p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => (
             <div key={`${c.id}-${c.term_id}`} data-prereq={`${c.code} ${c.term_name ?? ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--color-divider)' }}>
               <div style={{ fontSize: 14 }}><strong>{c.code}</strong> · {c.title} <span className="ink60">· {c.term_name ?? 'No term'}</span></div>
-              <div className="ink60" style={{ fontSize: 13 }}>Prerequisite: {c.prerequisite}</div>
+              <div className="ink60" style={{ fontSize: 13 }}>Prerequisite: {c.prerequisite ?? 'flagged for review (the student hadn’t marked one)'}</div>
               <div className="seg seg-modes" role="radiogroup" aria-label={`${c.code} ${c.term_name ?? ''} decision`} style={{ alignSelf: 'flex-start' }}>
                 <label className="seg-opt" data-v="required"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="approve" disabled={!me.is_college_counselor} />Approve</label>
                 <label className="seg-opt" data-v="off"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="decline" disabled={!me.is_college_counselor} />Decline</label>
@@ -462,7 +486,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
 
       <div className="pad-sm" style={section}>
         <div className="kicker">Steps · move forward or back</div>
-        {maxTerms.length > 0 && <div style={{ fontSize: 13 }}>Cleared for maximum units: <strong>{maxTerms.join(', ')}</strong>{p.school.designation !== 'CCAP' ? ' (not used: no longer at a CCAP school)' : ''}. Moving Clear units back removes this.</div>}
+        {maxTerms.length > 0 && <div style={{ fontSize: 13 }}>Cleared for maximum units: <strong>{maxTerms.join(', ')}</strong>{p.school.designation !== 'CCAP' ? ' (not used: no longer at a CCAP school)' : ''}. Moving College review back removes this.</div>}
         {p.steps.map((s) => (
           <form key={s.id} style={{ display: 'grid', gridTemplateColumns: '28px 1fr auto', gap: 8, alignItems: 'center', fontSize: 14 }}>
             <Hidden p={p} keep={keep} />
@@ -470,7 +494,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
             <span style={{ fontWeight: 800, color: s.status === 'complete' ? 'var(--color-accent)' : 'var(--ink-35)' }}>{pad(s.num)}</span>
             <span>
               {s.short}
-              <span className="ink60" style={{ fontSize: 12 }}> · {s.status === 'complete' ? `✓ ${fmt(s.completedAt)}` : s.status === 'in_review' ? 'In review' : s.status === 'waiting_parent' ? 'Waiting on parent' : s.status === 'changes' ? 'Changes requested' : s.status === 'locked' ? 'Locked' : s.status === 'scheduled' ? 'Not open yet' : 'Student to do'}</span>
+              <span className="ink60" style={{ fontSize: 12 }}> · {s.status === 'complete' ? `✓ ${fmt(s.completedAt)}` : stepStatusLabel(s)}</span>
             </span>
             {s.status === 'complete' ? (
               <ConfirmButton formAction={adminReopenStep} message={s.id === 3 ? `Remove ${p.student.first_name}'s parent consent? Consent is one-time, so only do this if the parent revoked it.` : `Reopen “${s.short}” and every step after it? (Parent consent stays on file.)`} style={{ color: 'var(--color-accent-700)', fontSize: 13 }}>
@@ -492,7 +516,19 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
             <Hidden p={p} keep={keep} />
             <input type="hidden" name="courseId" value={c.id} />
             <input type="hidden" name="fromTermId" value={c.term_id ?? ''} />
-            <span><strong>{c.code}</strong> · {c.units} units</span>
+            <input type="hidden" name="flag" value={c.prereq_flag ? 'off' : 'on'} />
+            <span><strong>{c.code}</strong> · {c.units} units
+              <span style={{ display: 'block', fontSize: 12 }} className={c.needs_prereq ? undefined : 'ink60'}>
+                {c.needs_prereq
+                  ? <>Prerequisite review: {c.prereq_status === 'approved' ? <span style={{ color: 'var(--color-accent-700)' }}>approved</span> : <strong style={{ color: '#8a4b00' }}>waiting</strong>}{c.prereq_flag ? ' (flagged)' : ''}</>
+                  : <>No prerequisite selected</>}
+                {!c.prerequisite && (
+                  <button formAction={adminFlagPrereq} className="btn btn-ghost" style={{ fontSize: 12, padding: '0 6px', color: c.prereq_flag ? 'var(--ink-60)' : '#8a4b00' }}>
+                    {c.prereq_flag ? 'Remove flag' : 'Needs prerequisite review'}
+                  </button>
+                )}
+              </span>
+            </span>
             <select name="termId" className="input" defaultValue={c.term_id ?? ''} aria-label={`Term for ${c.code}`} style={{ minHeight: 30, padding: '2px 6px', fontSize: 13 }}>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current === 1 ? '' : ' (closed)'}</option>)}
             </select>
@@ -504,8 +540,8 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <form style={{ display: 'flex', gap: 8 }}>
             <Hidden p={p} keep={keep} />
             <select name="courseId" className="input" required defaultValue="">
-              <option value="" disabled>Request a Dual Enrollment class…</option>
-              {offered.map((c) => <option key={c.id} value={c.id}>DE · {c.code} · {c.title} ({c.units})</option>)}
+              <option value="" disabled>Request a listed class…</option>
+              {offered.map((c) => <option key={c.id} value={c.id}>{c.kind === 'de' ? 'DE' : 'CE'} · {c.code} · {c.title} ({c.units})</option>)}
             </select>
             <select name="termId" className="input" defaultValue={p.term.id} aria-label="Term" style={{ width: 140 }}>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current === 1 ? '' : ' (closed)'}</option>)}

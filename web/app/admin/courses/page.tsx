@@ -2,12 +2,13 @@ import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
 import { Flash } from '@/components/chrome';
+import { CourseEditor } from '@/components/CourseEditor';
 import { importCourses } from '@/lib/course-import-actions';
 import { allTerms } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
-/** Links to each school's Dual Enrollment list. Concurrent Enrollment classes are typed in by students. */
+/** The Concurrent Enrollment list (students can also type in others), course upload, and links to each school's Dual Enrollment list. */
 export default async function CoursesPage({ searchParams }: { searchParams: Promise<{ course_saved?: string; course_removed?: string; course_error?: string; imported?: string; import_error?: string; school?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
@@ -61,7 +62,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       </div>
       <div className="pad-sm" style={{ padding: '24px 40px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="kicker">Concurrent Enrollment · taught at Shasta College</div>
-        <div style={{ fontSize: 14 }}>No list to keep up: students type in each concurrent class (course code and units) when they pick classes.</div>
+        <div style={{ fontSize: 14 }}>Classes on this list show as checkboxes for every student. Students can also type in any class that isn&apos;t listed (course code and units). A prerequisite here sends the class to prerequisite review automatically.</div>
+        <CourseEditor />
       </div>
       <div className="pad-sm" style={{ padding: '8px 40px 40px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="kicker">Dual Enrollment · taught at each high school</div>

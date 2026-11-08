@@ -29,6 +29,8 @@ export type Course = {
   kind: 'ce' | 'de'; school_id: number | null; period: string | null; teacher: string | null; active: number;
   /** Dual Enrollment: the only term this section is offered (null = every term). */
   offered_term_id: number | null;
+  /** 1 = a Concurrent class a student (or admin) typed in; 0 = on an admin-kept list. */
+  custom: number;
 };
 /** A requested class, with the term the student asked to take it in. */
 export type RequestedCourse = Course & {
@@ -36,9 +38,29 @@ export type RequestedCourse = Course & {
   /** High school approval for this class in this term (Non-CCAP schools). */
   hs_status: 'pending' | 'approved'; hs_by: number | null; hs_at: string | null;
   hs_signed_name: string | null; hs_signature_file_id: number | null; hs_sign_method: string | null; hs_signer_email: string | null;
+  /** Needs prerequisite review: the course has a prerequisite, or the class was flagged later (prereq_flag). */
+  needs_prereq: number; prereq_flag: number; prereq_status: 'approved' | null; prereq_at: string | null;
 };
 
 /** CCAP schools never use high school approval; Non-CCAP schools always do (per class, per term). */
+/** Days a student has to confirm registration once it opens before the step shows as overdue. */
+export const REGISTER_GRACE_DAYS = 5;
+
+/** Short label for a step's status (admin lists and panels). */
+export function stepStatusLabel(s: StudentStep): string {
+  if (s.id === 5 && s.overdue) return 'Overdue registration';
+  if (s.id === 5 && s.status === 'scheduled') return 'Ready to register';
+  if (s.id === 5 && s.status === 'current') return 'Registration open';
+  return { complete: 'Done', in_review: 'In review', waiting_parent: 'Waiting on parent', changes: 'Changes requested', locked: 'Locked', scheduled: 'Not open yet', current: 'Student to do' }[s.status];
+}
+/** "06 Register", "06 Overdue registration", "06 Ready to register": the step a student is on, for lists. */
+export function stepOnLabel(p: { next: StudentStep | null }): string {
+  const n = p.next;
+  if (!n) return 'Done';
+  const name = n.id === 5 && (n.overdue || n.status === 'scheduled') ? stepStatusLabel(n) : n.short;
+  return `${String(n.num).padStart(2, '0')} ${name}`;
+}
+
 export type Affidavit = { id: number; file_id: number | null; uploaded_by: number | null; uploaded_at: string; status: 'pending' | 'approved' | 'declined'; reviewed_by: number | null; reviewed_at: string | null; note: string | null };
 /** The student's most recent Private School Affidavit upload (homeschooled students). */
 export function latestAffidavit(studentId: number): Affidavit | null {
@@ -58,6 +80,8 @@ export type StudentStep = {
   completedAt: string | null;
   data: Record<string, unknown> | null;
   seen: boolean;
+  /** Register for classes: open for more than 5 days without the student confirming ("Overdue registration"). */
+  overdue?: boolean;
 };
 
 export type StudentProgress = {
@@ -176,7 +200,8 @@ export function getProgress(studentId: number): StudentProgress | null {
   // A reviewer (Clear units, Prerequisite review or High school approval) sent the courses back.
   const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;
   const courses = d
-    .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method, r.hs_signer_email
+    .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method, r.hs_signer_email,
+                     (c.prerequisite IS NOT NULL OR r.prereq_flag = 1) AS needs_prereq, r.prereq_flag, r.prereq_status, r.prereq_at
               FROM course_requests r JOIN courses c ON c.id = r.course_id
               LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? AND r.archived_at IS NULL ORDER BY t.registration_opens, c.code`)
     .all(studentId) as RequestedCourse[];
@@ -195,7 +220,11 @@ export function getProgress(studentId: number): StudentProgress | null {
   const term = unregistered[0] ?? requestTerms[0] ?? homeTerm;
   const termLabel = requestTerms.length ? requestTerms.map((t) => t.name).join(' + ') : homeTerm.name;
   // Prerequisite review only applies when a requested class has a prerequisite (or it already ran).
-  const needsPrereq = courses.some((c) => c.prerequisite) || (prog.has(8) && prog.get(8)!.status === 'complete');
+  // Prerequisite review is per class (like high school approval): done when every class that needs it is approved.
+  const prereqClasses = courses.filter((c) => c.needs_prereq);
+  const needsPrereq = prereqClasses.length > 0 || (prog.has(8) && prog.get(8)!.status === 'complete');
+  const prereqDone = prereqClasses.length ? prereqClasses.every((c) => c.prereq_status === 'approved') : prog.get(8)?.status === 'complete';
+  const prereqAt = prereqClasses.length && prereqDone ? prereqClasses.map((c) => c.prereq_at ?? '').sort().at(-1) || prog.get(8)?.completed_at || null : prog.get(8)?.completed_at ?? null;
   const young = isYoung(student);
   const adult = isAdult(student);
   const affidavit = latestAffidavit(studentId);
@@ -207,6 +236,7 @@ export function getProgress(studentId: number): StudentProgress | null {
 
   const steps: StudentStep[] = [];
   let blocked = false;
+  let blockedBefore7 = false;
   for (const def of STEP_DEFS) {
     const mode = modes[def.id] ?? 'required';
     if (mode === 'off') continue;
@@ -219,23 +249,32 @@ export function getProgress(studentId: number): StudentProgress | null {
     // so adding classes later (e.g. next term) opens it again for just those classes.
     const hsDone = courses.length > 0 && courses.every((c) => c.hs_status === 'approved');
     const autoCleared = def.id === 7 && p?.status !== 'complete' && unitsByMax;
-    const isComplete = def.id === 4 ? hsDone : def.id === 11 ? affidavit?.status === 'approved' : def.id === 5 ? registeredAll : p?.status === 'complete' || autoCleared;
+    const isComplete = def.id === 4 ? hsDone : def.id === 8 ? prereqDone : def.id === 11 ? affidavit?.status === 'approved' : def.id === 5 ? registeredAll : p?.status === 'complete' || autoCleared;
     const maxAt = autoCleared ? courses.map((c) => maxCleared.get(c.term_id!)!.cleared_at).sort().at(-1)! : null;
     const hsAt = def.id === 4 && hsDone ? courses.map((c) => c.hs_at ?? '').sort().at(-1) || p?.completed_at || null : null;
     let status: StepStatus;
+    if (def.id === 7) blockedBefore7 = blocked;
+    // Prerequisite review runs alongside Clear units: it opens when Clear units does.
+    const isBlocked = def.id === 8 ? blockedBefore7 : blocked;
     if (isComplete) status = 'complete';
     // The Private School Affidavit can be uploaded (and reviewed) any time; it still has to be approved before later steps.
     else if (def.id === 11) status = affidavit?.status === 'pending' ? 'in_review' : 'current';
-    else if (blocked) status = 'locked';
+    else if (isBlocked) status = 'locked';
     else if (def.id === 2 && changeRow) status = 'changes';
     else if (def.id === 3) status = 'waiting_parent';
     else if (def.id === 4 || def.id === 7 || def.id === 8 || def.id === 10 || (def.id === 11 && affidavit?.status === 'pending')) status = 'in_review';
     else if (def.id === 5 && !regOpen) status = 'scheduled';
     else status = 'current';
+    // Register: once the term's registration has been open (and the student ready) for more than 5 days, it's overdue.
+    let overdue = false;
+    if (def.id === 5 && status === 'current') {
+      const ready = [term.registration_opens, ...steps.map((x) => x.completedAt ?? '')].sort().at(-1)!;
+      overdue = Date.now() - new Date(ready).getTime() > REGISTER_GRACE_DAYS * 864e5;
+    }
     if (!isComplete && mode === 'required') blocked = true;
-    steps.push({
+    steps.push({ overdue,
       id: def.id, num: steps.length + 1, name: def.name, short: def.short, description: def.description,
-      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : def.id === 11 ? affidavit!.reviewed_at : def.id === 5 ? lastReg!.registered_at : autoCleared ? maxAt : p!.completed_at) : null,
+      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : def.id === 8 ? prereqAt : def.id === 11 ? affidavit!.reviewed_at : def.id === 5 ? lastReg!.registered_at : autoCleared ? maxAt : p!.completed_at) : null,
       data: def.id === 11 ? (affidavit ? { ...affidavit } : null) : def.id === 5 ? (isComplete ? { crns: lastReg!.crns } : null) : autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
       seen: !isComplete || !p || p.seen === 1 || def.id === 5,
     });
@@ -371,8 +410,10 @@ export function studentsForParent(parentId: number): User[] {
 
 export function schoolCourses(schoolId: number): Course[] {
   return db()
-    // The Dual Enrollment sections a student at this school can pick. Concurrent classes are typed in (see ceCourse).
-    .prepare("SELECT * FROM courses WHERE active = 1 AND kind = 'de' AND school_id = ? ORDER BY code")
+    // What a student at this school can pick from a list: their high school's Dual Enrollment sections, plus the
+    // Concurrent Enrollment list Shasta College keeps. Students can also type in any other Concurrent class (ceCourse),
+    // which is stored as a hidden (active = 0) course.
+    .prepare("SELECT * FROM courses WHERE active = 1 AND custom = 0 AND ((kind = 'de' AND school_id = ?) OR kind = 'ce') ORDER BY kind DESC, code")
     .all(schoolId) as Course[];
 }
 
@@ -389,11 +430,14 @@ export function parseCe(code: unknown, title: unknown, units: unknown, prereq: u
 }
 /** Find or create the (hidden) course row for a typed-in Concurrent class. */
 export function ceCourse(e: CeEntry): number {
+  // Typed a class that's on the Concurrent list (same code and units)? Use the listed one.
+  const listed = db().prepare("SELECT id FROM courses WHERE kind = 'ce' AND custom = 0 AND active = 1 AND code = ? AND units = ?").get(e.code, e.units) as { id: number } | undefined;
+  if (listed) return listed.id;
   const prereq = e.prereq ? 'Reported by the student' : null;
-  const found = db().prepare("SELECT id FROM courses WHERE kind = 'ce' AND code = ? AND title = ? AND units = ? AND prerequisite IS ?")
+  const found = db().prepare("SELECT id FROM courses WHERE kind = 'ce' AND custom = 1 AND code = ? AND title = ? AND units = ? AND prerequisite IS ?")
     .get(e.code, e.title, e.units, prereq) as { id: number } | undefined;
   if (found) return found.id;
-  return Number(db().prepare("INSERT INTO courses (code, title, units, schedule, prerequisite, kind, active) VALUES (?,?,?,'',?,'ce',0)")
+  return Number(db().prepare("INSERT INTO courses (code, title, units, schedule, prerequisite, kind, active, custom) VALUES (?,?,?,'',?,'ce',0,1)")
     .run(e.code, e.title, e.units, prereq).lastInsertRowid);
 }
 

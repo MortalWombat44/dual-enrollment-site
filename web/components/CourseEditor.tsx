@@ -12,7 +12,7 @@ export function CourseEditor({ schoolId }: { schoolId?: number }) {
   const de = !!schoolId;
   const courses = (de
     ? db().prepare("SELECT * FROM courses WHERE kind = 'de' AND school_id = ? ORDER BY active DESC, code").all(schoolId)
-    : db().prepare("SELECT * FROM courses WHERE kind = 'ce' ORDER BY active DESC, code").all()) as Course[];
+    : db().prepare("SELECT * FROM courses WHERE kind = 'ce' AND custom = 0 ORDER BY active DESC, code").all()) as Course[];
   const requested = new Map((db().prepare('SELECT course_id, COUNT(*) AS n FROM course_requests GROUP BY course_id').all() as { course_id: number; n: number }[]).map((r) => [r.course_id, r.n]));
   const cols = de ? '90px 1.3fr 56px 56px 1fr 1fr 120px 150px' : '110px 2fr 64px 1.4fr 150px';
   const terms = allTerms();

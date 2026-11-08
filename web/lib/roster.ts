@@ -1,6 +1,7 @@
 import 'server-only';
 import { db } from './db';
 import { getProgress, isYoung, pad, type Course } from './workflow';
+import { stepOnLabel } from './workflow';
 
 export type RosterStudent = {
   id: number; name: string; gradYear: number | null; term: string | null; young: boolean;
@@ -38,7 +39,7 @@ export function schoolRoster(schoolId: number, termId?: number): RosterClass[] {
       young: isYoung(p.student),
       term: r.term,
       // Archived: registration for the term was turned off before they registered. Kept so staff can see why.
-      step: r.archived_at ? 'Archived · registration turned off' : p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done',
+      step: r.archived_at ? 'Archived · registration turned off' : stepOnLabel(p),
       stepStatus: p.next?.status ?? 'complete',
     });
   }

@@ -51,7 +51,8 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
   const setTerm = (id: number, termId: number) => setSel((s) => new Map(s).set(id, termId));
 
   // Sections offered in one term only show while that term is open.
-  const listed = courses.filter((c) => termsFor(c).length > 0);
+  const listed = courses.filter((c) => c.kind === 'de' && termsFor(c).length > 0);
+  const ceList = courses.filter((c) => c.kind === 'ce');
 
   if (terms.length === 0) {
     return <div className="flash flash-err" style={{ padding: '12px 16px' }}>Registration isn't open for any term right now. Check back soon, or contact Shasta College Outreach.</div>;
@@ -101,7 +102,8 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
           <span style={{ fontWeight: 800, fontSize: 17 }}>Concurrent Enrollment</span>
           <span className="ink60" style={{ fontSize: 13 }}>Taught at Shasta College · type in each class</span>
         </div>
-        <div className="ink60" style={{ fontSize: 13, padding: '8px 0' }}>Enter the course code from the Shasta College schedule (like PSYC C1000) and its units.</div>
+        {ceList.map(row)}
+        <div className="ink60" style={{ fontSize: 13, padding: '10px 0 4px' }}>{ceList.length ? 'Taking a class that isn’t listed? ' : ''}Enter the course code from the Shasta College schedule (like PSYC C1000) and its units.</div>
         {ce.map((r, i) => (
           <div key={i} className="ce-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 1fr) minmax(120px, 1.4fr) 80px 150px auto', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '2px solid var(--color-divider)' }}>
             <input name="ce_code" className="input" placeholder="PSYC C1000" aria-label={`Course code ${i + 1}`} value={r.code} maxLength={20} required

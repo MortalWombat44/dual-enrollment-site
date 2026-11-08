@@ -46,7 +46,7 @@ export default async function SchoolDetail({ params, searchParams }: { params: P
       <div id="courses" className="pad-sm" style={{ padding: '8px 40px 48px', display: 'flex', flexDirection: 'column', gap: 12, borderTop: '2px solid var(--color-text)' }}>
         <div style={{ paddingTop: 24 }}>
           <div className="kicker">Dual Enrollment courses at {school.name}</div>
-          <div style={{ fontSize: 14, marginTop: 4 }}>Taught at the high school. Concurrent Enrollment classes (taught at Shasta College) are typed in by students.</div>
+          <div style={{ fontSize: 14, marginTop: 4 }}>Taught at the high school. Concurrent Enrollment classes (taught at Shasta College) are on the <a href="/admin/courses">Courses</a> page; students can also type in others.</div>
         </div>
         <Flash msg={sp.course_saved ? 'Course saved.' : sp.course_removed ? 'Course removed from new requests.' : null} />
         <Flash error msg={sp.course_error ? 'A course needs a code, a title and units.' : null} />
