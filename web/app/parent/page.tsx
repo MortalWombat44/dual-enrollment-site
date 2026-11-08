@@ -113,7 +113,7 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
                 <div className="kicker" style={{ opacity: 0.85 }}>{needsYou ? 'Waiting on you' : 'Up next'} · Step {pad(n.num)}</div>
                 <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 10, letterSpacing: '-0.02em' }}>{n.name}</div>
                 <p style={{ fontSize: 15, margin: '12px 0 0', color: 'var(--color-accent-100)' }}>
-                  {needsYou ? 'Sign online with your finger or mouse, or upload a signed copy. It takes about two minutes.' : upNextLine(p, n).replace(/\byour\b/g, `${kid.first_name}'s`)}
+                  {needsYou ? 'Sign online with your finger or mouse. It takes about two minutes.' : upNextLine(p, n).replace(/\byour\b/g, `${kid.first_name}'s`)}
                 </p>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

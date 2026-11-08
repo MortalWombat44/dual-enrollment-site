@@ -224,7 +224,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
       s.id === 10 ? 'A Shasta College counselor is reviewing your documents, then Shasta College makes the final decision.' :
       'Your high school is reviewing your classes. Check with your high school counselor if you have questions.') :
     s.status === 'waiting_parent' ? (
-      p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form from their own account.` :
+      p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online from their own account.` :
       p.parents[0] ? `${displayName(p.parents[0])} hasn't accepted your invite yet. Send them the link below again if they need it.` :
       'Invite your parent or guardian to sign. They get their own account, and it takes them about two minutes.') :
     s.status === 'changes' ? `${p.changeBy === 'college' ? 'Shasta College' : counselor} asked for changes to your course plan.` :
@@ -237,8 +237,8 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
         {s.id === 1 && s.status === 'current' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ol style={{ margin: 0, paddingLeft: 20, fontSize: 15, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <li>Go to <a href="https://www.cccapply.org" target="_blank" rel="noreferrer">CCCApply</a> and pick Shasta College.</li>
-              <li>Choose “Dual enrollment / special admit” as your enrollment status.</li>
+              <li><a href="https://www.shastacollege.edu/admissions-registration/apply-to-shasta-college/" target="_blank" rel="noreferrer">Go to CCCApply and apply to Shasta College</a>.</li>
+              <li>Choose “Dual enrollment / special admit” as your enrollment status. <a href="https://launch.comevo.com/shastacollege/1633" target="_blank" rel="noreferrer">Follow the step-by-step guide</a>.</li>
               <li>Shasta College emails you your student ID. Enter it below.</li>
             </ol>
             <div className="ink60" style={{ fontSize: 13 }}>You only do this step once. It carries over to future terms.</div>

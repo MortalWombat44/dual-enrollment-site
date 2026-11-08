@@ -199,6 +199,27 @@ CREATE TABLE IF NOT EXISTS registrations (
   marked_by INTEGER REFERENCES users(id), -- an admin marked it, instead of the student
   PRIMARY KEY (student_id, term_id)
 );
+-- Student files exported as a ZIP, by graduating class (0 = no graduation year). Deleting needs an export first.
+CREATE TABLE IF NOT EXISTS file_exports (
+  id INTEGER PRIMARY KEY,
+  grad_year INTEGER NOT NULL,
+  exported_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  exported_at TEXT NOT NULL,
+  file_count INTEGER NOT NULL
+);
+-- Deleting a class's files waits 10 minutes (run_at) so it can be cancelled.
+CREATE TABLE IF NOT EXISTS file_deletions (
+  id INTEGER PRIMARY KEY,
+  grad_year INTEGER NOT NULL,
+  requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  requested_at TEXT NOT NULL,
+  run_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('scheduled','cancelled','done')),
+  cancelled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  finished_at TEXT,
+  files_deleted INTEGER,
+  bytes_deleted INTEGER
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -214,7 +235,7 @@ type Mode = 'required' | 'optional' | 'off';
 export const STEP_DEFS: { id: number; name: string; short: string; description: string }[] = [
   { id: 1, name: 'Apply on CCCApply', short: 'CCCApply', description: 'Creates the Shasta College student record' },
   // Parent consent comes before course selection: students can't pick classes until a parent has signed.
-  { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'E-signature or uploaded signed form' },
+  { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'Parent signs online (digital signature)' },
   { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
   { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
   // Young students (8th grade and below) only: documents, then a college counselor recommends and an approver decides.

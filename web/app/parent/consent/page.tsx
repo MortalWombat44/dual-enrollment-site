@@ -37,7 +37,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
             <div className="kicker accent700">Step {pad(step.num)} of {p.total}</div>
             <h1 className="h-sm" style={{ fontSize: 44, lineHeight: 1.05, margin: '10px 0 0', letterSpacing: '-0.02em' }}>Parent / guardian consent</h1>
             <p style={{ fontSize: 16, margin: '12px 0 0', maxWidth: 600, textWrap: 'pretty' }}>
-              Sign online, or upload a signed copy of the Shasta College Dual Enrollment consent form. {first} can't be approved until this is in.
+              Sign the Shasta College Dual Enrollment consent form online with your finger or mouse. {first} can't be approved until this is in.
             </p>
           </div>
           <ConsentForm action={submitConsent} studentId={studentId} studentFirst={first} parentName={`${me.first_name} ${me.last_name}`} error={sp.error ? ERRORS[sp.error] : undefined} />

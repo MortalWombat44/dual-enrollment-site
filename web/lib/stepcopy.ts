@@ -77,9 +77,9 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
     case 1: return 'Apply to Shasta College on CCCApply, then enter your Shasta College ID here.';
     case 2: return s.status === 'changes' ? `${p.changeBy === 'college' ? 'Shasta College' : counselor} asked for changes to your course plan.` : "Pick the Shasta College sections offered for your school.";
     case 3:
-      if (!p.parents.length) return 'Invite your parent or guardian. They make an account and sign online or upload a signed form.';
+      if (!p.parents.length) return 'Invite your parent or guardian. They make an account and sign online.';
       return p.parents.some((x) => x.status === 'active')
-        ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form.`
+        ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online.`
         : `${displayName(p.parents[0])} hasn't accepted your invite yet.`;
     case 7: return `Shasta College is checking that ${list} fit your unit limit. Usually 1–2 days.`;
     case 8: return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.prerequisite).map((c) => c.code).join(', ') || 'your classes'}.`;

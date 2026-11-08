@@ -4,7 +4,7 @@ import { logout } from '@/lib/session-actions';
 import { retireNudge } from '@/lib/retire';
 import { dismissRetireReminder } from '@/lib/admin-actions';
 
-export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'roster' | 'users' | 'schools' | 'courses' | 'terms' | 'audit' | 'reports'; children: React.ReactNode }) {
+export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'roster' | 'users' | 'schools' | 'courses' | 'terms' | 'audit' | 'files' | 'reports'; children: React.ReactNode }) {
   const isSuper = me.admin_level === 'super';
   // Each June, remind super admins to retire the class from 4 years ago.
   const nudge = isSuper ? retireNudge() : null;
@@ -23,6 +23,7 @@ export function AdminShell({ me, current, children }: { me: User; current: 'stud
           {isSuper && link('courses', '/admin/courses', 'Courses')}
           {isSuper && link('terms', '/admin/terms', 'Terms')}
           {isSuper && link('audit', '/admin/audit', 'Audit')}
+          {isSuper && link('files', '/admin/files', 'Student files')}
           {link('reports', '/admin/reports', 'Reports')}
         </nav>
         <div className="admin-me">
