@@ -1,0 +1,50 @@
+// Course lists: removed classes hidden behind "Show removed"; save / remove / restore / add without a page reload.
+const { chromium } = require('playwright');
+const { DatabaseSync } = require('node:sqlite');
+const B = 'http://localhost:3100', DB = require('path').join(__dirname, '..', 'data', 'de.sqlite');
+const check = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('ok -', m); };
+const sql = (q, ...a) => { const d = new DatabaseSync(DB); const st = d.prepare(q); const r = /^\s*select/i.test(q) ? st.all(...a) : st.run(...a); d.close(); return r; };
+(async () => {
+  await fetch(B + '/signup');
+  sql("UPDATE courses SET active = 0 WHERE kind = 'ce' AND code = 'HIST 17'");
+  const b = await chromium.launch();
+  const p = await (await b.newContext({ viewport: { width: 1280, height: 1000 } })).newPage();
+  await p.goto(B + '/login'); await p.fill('#email', 'dortiz@shastacollege.edu'); await p.fill('#password', 'shasta2027');
+  await Promise.all([p.waitForURL(/admin/), p.click('button:has-text("Sign in")')]);
+  await p.goto(B + '/admin/courses'); await p.waitForLoadState('networkidle');
+  const ed = p.locator('[data-course-editor]');
+  check(await ed.locator('form[data-course="HIST 17"]').count() === 0 && await ed.locator('button:has-text("Show removed (1)")').count() === 1, 'removed class hidden; Show removed (1)');
+  await ed.locator('button:has-text("Show removed")').click();
+  check(await ed.locator('form[data-course="HIST 17"] >> text=Removed').count() === 1, 'Show removed reveals it');
+  await ed.locator('button:has-text("Hide removed")').click();
+  // Marker: survives only if the page doesn't reload.
+  await p.evaluate(() => { window.__noReload = 1; window.scrollTo(0, 400); });
+  const psy = ed.locator('form[data-course="PSY 1"]');
+  await psy.locator('input[name="title"]').fill('General Psychology (updated)');
+  await psy.locator('button:has-text("Save")').click();
+  await psy.locator('text=✓ Saved').waitFor();
+  check(sql("SELECT title FROM courses WHERE code = 'PSY 1' AND kind = 'ce'")[0].title === 'General Psychology (updated)', 'save stores the change');
+  check(await p.evaluate(() => window.__noReload === 1 && window.scrollY > 300), 'no page reload (and the scroll position stays)');
+  await ed.locator('form[data-course="COMM 1"] button:has-text("Remove")').click();
+  await ed.locator('button:has-text("Show removed (2)")').waitFor();
+  check(await ed.locator('form[data-course="COMM 1"]').count() === 0 && sql("SELECT active FROM courses WHERE code = 'COMM 1' AND kind = 'ce'")[0].active === 0, 'remove hides it in place');
+  await ed.locator('button:has-text("Show removed")').click();
+  await ed.locator('form[data-course="COMM 1"] button:has-text("Restore")').click();
+  await ed.locator('form[data-course="COMM 1"] >> text=✓ Restored').waitFor();
+  check(sql("SELECT active FROM courses WHERE code = 'COMM 1' AND kind = 'ce'")[0].active === 1, 'restore works in place');
+  const add = ed.locator('form:has(button:has-text("Add course"))');
+  await add.locator('input[name="code"]').fill('art c1000'); await add.locator('input[name="title"]').fill('Art History'); await add.locator('input[name="units"]').fill('3');
+  await add.locator('button:has-text("Add course")').click();
+  await ed.locator('form[data-course="ART C1000"]').waitFor();
+  check(await add.locator('input[name="code"]').inputValue() === '', 'added course appears; add form clears');
+  await add.locator('input[name="code"]').fill('X'); await add.locator('input[name="title"]').fill('Bad'); await add.locator('input[name="units"]').fill('3');
+  check(await p.evaluate(() => window.__noReload === 1), 'still no reload after remove/restore/add');
+  // Dual Enrollment list on a school page uses the same editor.
+  await p.goto(B + '/admin/schools'); await p.click('tr:has-text("Anderson High School") >> text=Edit steps'); await p.waitForLoadState('networkidle');
+  const de = p.locator('#courses [data-course-editor] form[data-course="ENGL C1000"]');
+  await de.locator('input[name="teacher"]').fill('Ms. Grant'); await de.locator('button:has-text("Save")').click();
+  await de.locator('text=✓ Saved').waitFor();
+  check(sql("SELECT teacher FROM courses WHERE code = 'ENGL C1000' AND school_id = (SELECT id FROM schools WHERE name = 'Anderson High School')")[0].teacher === 'Ms. Grant', 'school Dual Enrollment list saves in place too');
+  await b.close();
+  console.log('ALL PASSED');
+})().catch((e) => { console.error(e); process.exit(1); });

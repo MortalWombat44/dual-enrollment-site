@@ -172,65 +172,12 @@ export async function setUserDisabled(formData: FormData) {
 
 /* ── Course lists: Dual Enrollment (per school, edited on the school page) and Concurrent (college-wide) ── */
 
-function courseFields(formData: FormData) {
-  const str = (k: string, max = 120) => String(formData.get(k) || '').trim().slice(0, max);
-  const units = Number(formData.get('units'));
-  return {
-    code: str('code', 20).toUpperCase(),
-    title: str('title'),
-    units: Number.isFinite(units) && units > 0 && units <= 10 ? units : NaN,
-    period: str('period', 20) || null,
-    teacher: str('teacher', 80) || null,
-    prerequisite: str('prerequisite', 200) || null,
-    // Dual Enrollment: offered in one term only (blank = every term).
-    offeredTerm: Number(formData.get('offered_term_id')) && db().prepare('SELECT 1 FROM terms WHERE id = ?').get(Number(formData.get('offered_term_id'))) ? Number(formData.get('offered_term_id')) : null,
-  };
-}
 
-function courseReturn(formData: FormData, extra: string) {
-  const sid = Number(formData.get('school_id'));
-  return sid ? `/admin/schools/${sid}?${extra}#courses` : `/admin/courses?${extra}`;
-}
 
-export async function addCourse(formData: FormData) {
-  await requireAdmin('super');
-  const f = courseFields(formData);
-  const schoolId = Number(formData.get('school_id')) || null;
-  const kind = schoolId ? 'de' : 'ce';
-  if (!f.code || !f.title || Number.isNaN(f.units)) redirect(courseReturn(formData, 'course_error=1'));
-  if (schoolId && !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) redirect('/admin/schools');
-  db().prepare('INSERT INTO courses (code, title, units, schedule, prerequisite, kind, school_id, period, teacher, offered_term_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(f.code, f.title, f.units, '', f.prerequisite, kind, schoolId, kind === 'de' ? f.period : null, kind === 'de' ? f.teacher : null, kind === 'de' ? f.offeredTerm : null);
-  redirect(courseReturn(formData, 'course_saved=1'));
-}
 
-export async function saveCourse(formData: FormData) {
-  await requireAdmin('super');
-  const id = Number(formData.get('id'));
-  const c = db().prepare('SELECT kind FROM courses WHERE id = ?').get(id) as { kind: 'ce' | 'de' } | undefined;
-  if (!c) redirect(courseReturn(formData, 'course_error=1'));
-  const f = courseFields(formData);
-  if (!f.code || !f.title || Number.isNaN(f.units)) redirect(courseReturn(formData, 'course_error=1'));
-  if (c!.kind === 'de') {
-    db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, period = ?, teacher = ?, prerequisite = ?, offered_term_id = ? WHERE id = ?').run(f.code, f.title, f.units, f.period, f.teacher, f.prerequisite, f.offeredTerm, id);
-  } else {
-    db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, prerequisite = ? WHERE id = ?').run(f.code, f.title, f.units, f.prerequisite, id);
-  }
-  redirect(courseReturn(formData, 'course_saved=1'));
-}
 
-/** Removing hides a course from new requests; students who already requested it keep it. */
-export async function removeCourse(formData: FormData) {
-  await requireAdmin('super');
-  db().prepare('UPDATE courses SET active = 0 WHERE id = ?').run(Number(formData.get('id')));
-  redirect(courseReturn(formData, 'course_removed=1'));
-}
 
-export async function restoreCourse(formData: FormData) {
-  await requireAdmin('super');
-  db().prepare('UPDATE courses SET active = 1 WHERE id = ?').run(Number(formData.get('id')));
-  redirect(courseReturn(formData, 'course_saved=1'));
-}
+
 
 /** Super admin: make a one-time password reset link to send someone yourself (works without email set up). */
 export async function adminResetLink(formData: FormData) {
