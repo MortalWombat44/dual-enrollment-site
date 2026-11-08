@@ -24,13 +24,13 @@ async function login(b, email, pw = 'shasta2027') {
   check(await seen(tab, 'text=Dual Enrollment courses at Anderson High School'), 'school page has DE course list');
   const grant = tab.locator('#courses form:has(input[value="ENGL C1000"])');
   await grant.locator('input[name="period"]').fill('1'); await grant.locator('input[name="teacher"]').fill('Ms. Grant');
-  await Promise.all([tab.waitForURL(/course_saved/), grant.locator('button:has-text("Save")').click()]);
-  await tab.waitForSelector('text=Course saved.');
+  await grant.locator('button:has-text("Save")').click();
+  await grant.locator('text=✓ Saved').waitFor(); // saves in place, no reload
   check(await tab.locator('#courses input[value="Ms. Grant"]').count() === 1 && await tab.inputValue('#courses form:has(input[value="Ms. Grant"]) input[name="period"]') === '1', 'edited period + teacher saved');
   const add = tab.locator('#courses form:has(button:has-text("Add course"))');
   await add.locator('input[name="code"]').fill('psy 1'); await add.locator('input[name="title"]').fill('General Psychology');
   await add.locator('input[name="units"]').fill('3'); await add.locator('input[name="period"]').fill('4'); await add.locator('input[name="teacher"]').fill('Mr. Ames');
-  await Promise.all([tab.waitForURL(/course_saved/), add.locator('button:has-text("Add course")').click()]);
+  await add.locator('button:has-text("Add course")').click();
   check(await seen(tab, '#courses input[value="PSY 1"]'), 'DE course added (code uppercased)');
   await tab.screenshot({ path: OUT + '/f1-school-de-courses.png', fullPage: true });
 
