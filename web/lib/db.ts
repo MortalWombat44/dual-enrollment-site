@@ -245,7 +245,8 @@ export function db(): Db {
     migrate(conn);
     const count = conn.prepare('SELECT COUNT(*) AS n FROM steps').get() as { n: number };
     if (count.n === 0) seed(conn);
-    ensureAccounts(conn);
+    removeRetiredSeedAccounts(conn);
+    sweepYoungDocs(conn);
     // Class requests made before classes had terms get the student's term.
     conn.exec('UPDATE course_requests SET term_id = (SELECT term_id FROM enrollments e WHERE e.student_id = course_requests.student_id) WHERE term_id IS NULL');
     if (count.n === 0) approveFromStepFour(conn);
@@ -455,14 +456,35 @@ function seed(d: DatabaseSync) {
  * Named accounts that must exist on every database, including a freshly reset one.
  * Created only if missing, so a changed password is never overwritten.
  */
-function ensureAccounts(d: DatabaseSync) {
-  const accounts = [
-    { first: 'Tabitha', last: 'Miller', email: 'tmiller@shastacollege.edu', password: 'ShastaDE2027', level: 'super' },
-  ];
-  for (const a of accounts) {
-    if (d.prepare('SELECT 1 FROM users WHERE email = ?').get(a.email)) continue;
-    d.prepare("INSERT INTO users (first_name, last_name, email, role, status, password_hash, admin_level) VALUES (?,?,?,'admin','active',?,?)")
-      .run(a.first, a.last, a.email, hashPassword(a.password), a.level);
+/** Tabitha Miller's account was seeded with a password in the code; it's been removed. Deletes it where it still exists. */
+function removeRetiredSeedAccounts(d: DatabaseSync) {
+  const u = d.prepare("SELECT id FROM users WHERE email = 'tmiller@shastacollege.edu'").get() as { id: number } | undefined;
+  if (!u) return;
+  d.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);
+  try {
+    d.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+  } catch {
+    // Still referenced by records (e.g. a decision she made): keep the row for the history, but no one can sign in as her.
+    d.prepare("UPDATE users SET disabled = 1, password_hash = NULL, invite_token = NULL, status = 'invited' WHERE id = ?").run(u.id);
+  }
+}
+
+/**
+ * Young student documents (report card, principal letter) that no longer belong to the student's current
+ * "Young student documents" step, e.g. after they were sent back and uploaded new ones. Deletes them from disk too.
+ */
+export function sweepYoungDocs(d: { prepare: DatabaseSync['prepare'] } = _db!) {
+  const keep = new Set<number>();
+  for (const r of d.prepare('SELECT data FROM step_progress WHERE step_id = 9 AND data IS NOT NULL').all() as { data: string }[]) {
+    const x = JSON.parse(r.data) as { transcript_file_id?: number; letter_file_id?: number };
+    if (x.transcript_file_id) keep.add(x.transcript_file_id);
+    if (x.letter_file_id) keep.add(x.letter_file_id);
+  }
+  const files = d.prepare("SELECT id, stored_name FROM files WHERE kind IN ('young_transcript', 'young_letter')").all() as { id: number; stored_name: string }[];
+  for (const f of files) {
+    if (keep.has(f.id)) continue;
+    d.prepare('DELETE FROM files WHERE id = ?').run(f.id);
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(f.stored_name))); } catch { /* already gone */ }
   }
 }
 

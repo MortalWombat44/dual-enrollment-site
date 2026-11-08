@@ -1,5 +1,5 @@
 import 'server-only';
-import { db, DEFAULT_MODES, STEP_DEFS, STEP_ORDER, tx } from './db';
+import { db, DEFAULT_MODES, STEP_DEFS, STEP_ORDER, sweepYoungDocs, tx } from './db';
 import type { User } from './auth';
 
 export type Mode = 'required' | 'optional' | 'off';
@@ -269,6 +269,7 @@ export function requestChanges(studentId: number, stepId: number, by: User, note
     d.prepare('INSERT OR REPLACE INTO step_progress (student_id, step_id, status, completed_at, data) VALUES (?,?,?,?,?)').run(
       studentId, stepId, 'changes_requested', now(), JSON.stringify({ by_id: by.id, note }));
   });
+  sweepYoungDocs(); // documents sent before are replaced by new ones
 }
 
 /**
@@ -286,6 +287,7 @@ export function reopenFrom(studentId: number, stepId: number) {
     // Moving Clear units back on purpose also drops any "cleared for maximum units" so it really reopens.
     if (later.includes(7)) d.prepare('DELETE FROM unit_clearances WHERE student_id = ?').run(studentId);
   });
+  if (later.includes(9)) sweepYoungDocs();
 }
 
 export function studentsForParent(parentId: number): User[] {

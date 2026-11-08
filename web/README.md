@@ -23,7 +23,6 @@ Demo accounts (password `shasta2027`):
 | High School Staff, Enterprise HS (Non-CCAP) | ralvarez@suhsd.net |
 | Super admin + Young Student Approver | dortiz@shastacollege.edu |
 | College admin + college counselor (primary school: Enterprise HS) | jkim@shastacollege.edu |
-| Super admin (password `ShastaDE2027`) | tmiller@shastacollege.edu |
 
 ## Screens → routes
 
@@ -90,7 +89,8 @@ Step ids in the database don't follow this order (Clear units is id 7, Prerequis
 - **Approve & sign digitally:** High school approval needs the staff member's signature: their saved one, drawn (finger, stylus or mouse), or typed and shown in a cursive script. They can save it for next time. Each approval keeps its signature image.
 - **Audit (super admins, `/admin/audit`):** paste Shasta College IDs, pick terms, and download one PDF with each student's parent consent (drawn signature, or the uploaded form attached) and course requests for those terms, plus approvals, including the high school staff signature where the school requires high school approval. A single student's PDF is also linked from their admin panel. Built with pdf-lib.
 - **Retiring accounts:** Users → "Retire graduated classes" switches off every student in a graduated class (and parents whose students are all retired). Records are kept; Enable restores an account. Each June super admins see a reminder to retire the class from 4 years ago (dismissable for the year; `DE_TODAY=YYYY-MM-DD` overrides the date for testing).
-- **Seeded named accounts** (`ensureAccounts` in `lib/db.ts`) are created on every fresh database, only if missing.
+- **No named accounts are seeded with passwords in the code.** The old seeded super admin (tmiller@shastacollege.edu) is deleted at startup wherever it still exists. Create real admins from Users.
+- **Young student documents** that are replaced (the student was sent back and uploads again) are deleted, from the database and from disk.
 
 ## Workflow rules
 
