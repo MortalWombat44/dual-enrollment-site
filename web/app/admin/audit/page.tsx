@@ -67,7 +67,7 @@ export default async function Audit({ searchParams }: { searchParams: Promise<SP
                     <td>{s.school}</td>
                     <td>{consent?.status === 'complete' ? <span className="tag tag-accent">On file</span> : consent ? <span className="tag tag-neutral">Missing</span> : 'Not required'}</td>
                     <td>{inTerms.length ? inTerms.map((c) => c.code).join(', ') : '—'}</td>
-                    <td>{!hs ? 'Not required' : hs.status !== 'complete' ? <span className="tag tag-neutral">Not approved</span> : hs.data?.signature_file_id ? <span className="tag tag-accent">Signed</span> : <span className="tag tag-neutral">No signature</span>}</td>
+                    <td>{!hs ? 'Not required' : hs.status !== 'complete' ? <span className="tag tag-neutral">Not approved</span> : p.courses.every((c) => c.hs_signature_file_id) ? <span className="tag tag-accent">Signed</span> : <span className="tag tag-neutral">No signature</span>}</td>
                     <td><a href={`/admin/audit.pdf?${one}`}>PDF</a></td>
                   </tr>
                 );

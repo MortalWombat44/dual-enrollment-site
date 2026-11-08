@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
 import { classLabel, currentGrade, GRADES, isYoung, openIdChange, ordinal, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
-import { approve, requestIdChange, sendBack, staffSetGrade } from '@/lib/counselor-actions';
+import { approve, requestIdChange, staffSetGrade } from '@/lib/counselor-actions';
 import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
 import { ApproveSignForm } from '@/components/ApproveSignForm';
@@ -49,7 +49,7 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
     <div className="frame">
       <TopBar user={me} nav={[{ href: '/counselor', label: 'Review queue' }]} current="/counselor" right={<span className="tag tag-neutral">Counselor · {school?.name.replace('High School', 'HS') ?? '—'}</span>} />
       <Flash msg={flash} />
-      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows what to change.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : null} error />
+      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows why a class was declined.' : sp.error === 'decide' ? 'Approve or decline every class.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : null} error />
       {counselorOff && <Flash msg={`High school approval is turned off for ${school?.name}. New students skip this step.`} />}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label="Waiting on you" value={String(groups.ready.length)} hero />
@@ -134,11 +134,12 @@ function ReviewPanel({ p, me }: { p: StudentProgress | null; me: User }) {
       </div>
       {canAct ? (
         <ApproveSignForm
+          key={`${p.student.id}-${p.courses.map((c) => `${c.id}:${c.term_id}:${c.hs_status}`).join(',')}`}
           studentId={p.student.id}
           staffName={`${me.first_name} ${me.last_name}`}
           savedUrl={me.signature_file_id ? `/files/${me.signature_file_id}` : null}
+          pending={p.courses.filter((c) => c.hs_status === 'pending').map((c) => ({ id: c.id, term_id: c.term_id, code: c.code, title: c.title, term_name: c.term_name }))}
           approve={approve}
-          sendBack={sendBack}
         />
       ) : s4?.status === 'complete' && s4.data?.note ? (
         <div className="pad-sm" style={{ padding: '20px 32px', fontSize: 14 }}>Your note: “{String(s4.data.note)}”</div>

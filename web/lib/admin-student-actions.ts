@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
 import { db, tx } from './db';
-import { currentClassYear, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
+import { ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
 function back(formData: FormData, extra: Record<string, string> = {}) {
@@ -68,6 +68,39 @@ export async function decidePrerequisites(formData: FormData) {
   redirect(back(formData, { done: 'prereq' }));
 }
 
+/** Young student review, part 1: a college counselor recommends (or not) and gives feedback. */
+export async function recommendYoung(formData: FormData) {
+  const { me, studentId, p, note } = await load(formData);
+  if (!me.is_college_counselor) redirect(back(formData, { error: 'not_counselor_young' }));
+  if (p.steps.find((s) => s.id === 10)?.status !== 'in_review' || youngRecommendation(studentId)) redirect(back(formData));
+  const rec = formData.get('rec');
+  if (rec !== 'recommend' && rec !== 'not_recommend') redirect(back(formData, { error: 'decide' }));
+  if (!note) redirect(back(formData, { error: 'feedback' }));
+  const data: YoungRec = { rec_by: me.id, rec: rec as YoungRec['rec'], rec_note: note, rec_at: new Date().toISOString() };
+  db().prepare('INSERT OR REPLACE INTO young_reviews (student_id, rec_by, rec, rec_note, rec_at) VALUES (?,?,?,?,?)')
+    .run(studentId, data.rec_by, data.rec, data.rec_note, data.rec_at);
+  redirect(back(formData, { done: 'young_rec' }));
+}
+
+/** Young student review, part 2: a Young Student Approver (not the recommender) approves or declines. */
+export async function decideYoung(formData: FormData) {
+  const { me, studentId, p, note } = await load(formData);
+  if (!me.is_young_approver) redirect(back(formData, { error: 'not_young_approver' }));
+  const rec = youngRecommendation(studentId);
+  if (p.steps.find((s) => s.id === 10)?.status !== 'in_review' || !rec) redirect(back(formData));
+  if (rec!.rec_by === me.id) redirect(back(formData, { error: 'same_person' }));
+  const decision = formData.get('decision');
+  if (decision === 'approve') {
+    completeStep(studentId, 10, { ...rec, admin_id: me.id, decision: 'approved', note }, true);
+    db().prepare('DELETE FROM young_reviews WHERE student_id = ?').run(studentId);
+    redirect(back(formData, { done: 'young_approved' }));
+  }
+  if (decision !== 'decline') redirect(back(formData, { error: 'decide' }));
+  if (!note) redirect(back(formData, { error: 'note' }));
+  requestChanges(studentId, 10, me, note);
+  redirect(back(formData, { done: 'young_declined' }));
+}
+
 /** Override · move a step forward (mark it complete). */
 export async function adminCompleteStep(formData: FormData) {
   const { me, studentId, p } = await load(formData);
@@ -78,6 +111,11 @@ export async function adminCompleteStep(formData: FormData) {
   if (stepId === 3) Object.assign(data, { method: 'office', signer: 'On file with Shasta College' });
   if (stepId === 1) data.confirmation = 'Verified by Shasta College';
   db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
+  if (stepId === 4) {
+    // High school approval is per class: the override marks every pending class approved by Shasta College (no HS signature).
+    db().prepare(`UPDATE course_requests SET hs_status = 'approved', hs_by = ?, hs_at = ?, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = 'admin'
+      WHERE student_id = ? AND hs_status = 'pending'`).run(me.id, new Date().toISOString(), studentId);
+  }
   completeStep(studentId, stepId, data, true);
   redirect(back(formData, { done: 'moved' }));
 }
@@ -93,18 +131,26 @@ export async function adminReopenStep(formData: FormData) {
 
 export async function adminAddCourse(formData: FormData) {
   const { studentId, p } = await load(formData);
-  const courseId = Number(formData.get('courseId'));
-  const offered = db().prepare("SELECT 1 FROM courses WHERE id = ? AND active = 1 AND (kind = 'ce' OR (kind = 'de' AND school_id = ?))").get(courseId, p.school.id);
-  if (!offered) redirect(back(formData));
   const termId = Number(formData.get('termId'));
   if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
+  let courseId: number;
+  if (formData.has('ce_code')) {
+    // Concurrent class typed in by the admin (code + units).
+    const e = parseCe(formData.get('ce_code'), '', formData.get('ce_units'), '0');
+    if (!e) redirect(back(formData, { error: 'ce' }));
+    courseId = ceCourse(e!);
+  } else {
+    courseId = Number(formData.get('courseId'));
+    if (!db().prepare("SELECT 1 FROM courses WHERE id = ? AND active = 1 AND kind = 'de' AND school_id = ?").get(courseId, p.school.id)) redirect(back(formData));
+  }
   db().prepare('INSERT OR IGNORE INTO course_requests (student_id, course_id, term_id) VALUES (?,?,?)').run(studentId, courseId, termId);
   redirect(back(formData, { done: 'course_added' }));
 }
 
 export async function adminRemoveCourse(formData: FormData) {
   const { studentId } = await load(formData);
-  db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ?').run(studentId, Number(formData.get('courseId')));
+  const from = Number(formData.get('fromTermId')) || null;
+  db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?').run(studentId, Number(formData.get('courseId')), from);
   redirect(back(formData, { done: 'course_removed' }));
 }
 
@@ -147,7 +193,11 @@ export async function adminSetCourseTerm(formData: FormData) {
   const { studentId } = await load(formData);
   const termId = Number(formData.get('termId'));
   if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
-  db().prepare('UPDATE course_requests SET term_id = ? WHERE student_id = ? AND course_id = ?').run(termId, studentId, Number(formData.get('courseId')));
+  const from = Number(formData.get('fromTermId')) || null;
+  if (from === termId) redirect(back(formData));
+  // A class in a new term needs its own high school approval.
+  db().prepare(`UPDATE OR IGNORE course_requests SET term_id = ?, hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL
+    WHERE student_id = ? AND course_id = ? AND term_id IS ?`).run(termId, studentId, Number(formData.get('courseId')), from);
   redirect(back(formData, { done: 'course_term' }));
 }
 

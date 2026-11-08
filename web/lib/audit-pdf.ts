@@ -134,19 +134,42 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
   // 3 · Approvals
   w.heading('Approvals');
   const hs = p.steps.find((s) => s.id === 4);
-  const hd = (hs?.data ?? {}) as { counselor_id?: number; signed_name?: string; signature_file_id?: number; sign_method?: string; signed_at?: string; note?: string; admin_id?: number; override?: boolean };
-  if (!hs) w.text('High school approval: not required at this school.');
-  else if (hs.status !== 'complete') w.text('High school approval: not yet approved.', { bold: true });
-  else if (hd.override || hd.admin_id) w.text(`High school approval: marked complete by Shasta College admin ${fullName(person(hd.admin_id))} on ${when(hs.completedAt)} (no high school signature).`);
+  if (!hs) w.text('High school approval: not used at CCAP schools.');
   else {
-    const staff = person(hd.counselor_id);
-    w.text(`High school approval: approved and digitally signed by ${hd.signed_name ?? fullName(staff)}, High School Staff, ${p.school.name}, on ${when(hd.signed_at ?? hs.completedAt)}.`);
-    if (hd.note) w.text(`Note: “${hd.note}”`, { size: 9, color: MUTED });
-    const img = await embedStoredPng(doc, hd.signature_file_id);
-    if (img) {
-      w.image(img, 260, 70);
-      w.text(`Signature (${hd.sign_method ?? 'drawn'})`, { size: 8, color: MUTED, gap: 6 });
-    } else w.text('No signature image on file (approved before digital signatures).', { size: 9, color: MUTED });
+    // One approval per class per term. Classes approved together share one signature.
+    w.text('High school approval (each class, each term):', { bold: true, gap: 4 });
+    const list = p.courses.filter((c) => terms.some((t) => t.id === c.term_id));
+    if (!list.length) w.text('No classes in the selected term(s).', { size: 9, x: M + 14 });
+    const batches = new Map<string, typeof list>();
+    for (const c of list) {
+      const k = c.hs_status === 'approved' ? `${c.hs_by}|${c.hs_at}|${c.hs_signature_file_id}|${c.hs_sign_method}` : 'pending';
+      batches.set(k, [...(batches.get(k) ?? []), c]);
+    }
+    for (const [k, cs] of batches) {
+      const names = cs.map((c) => `${c.code} (${c.term_name ?? 'no term'})`).join(', ');
+      if (k === 'pending') { w.text(`${names}: not yet approved.`, { size: 10, x: M + 14, bold: true }); continue; }
+      const c = cs[0];
+      if (c.hs_sign_method === 'admin') {
+        w.text(`${names}: marked approved by Shasta College admin ${fullName(person(c.hs_by))} on ${when(c.hs_at)} (no high school signature).`, { x: M + 14 });
+        continue;
+      }
+      w.text(`${names}: approved and digitally signed by ${c.hs_signed_name ?? fullName(person(c.hs_by))}, High School Staff, ${p.school.name}, on ${when(c.hs_at)}.`, { x: M + 14 });
+      const img = await embedStoredPng(doc, c.hs_signature_file_id ?? undefined);
+      if (img) {
+        w.image(img, 260, 70);
+        w.text(`Signature (${c.hs_sign_method ?? 'drawn'})`, { size: 8, color: MUTED, gap: 6 });
+      } else w.text('No signature image on file.', { size: 9, color: MUTED, x: M + 14 });
+    }
+  }
+  const yr = p.steps.find((s) => s.id === 10);
+  if (yr) {
+    const yd = (yr.data ?? {}) as { rec_by?: number; rec?: string; rec_note?: string; rec_at?: string; admin_id?: number; note?: string; override?: boolean };
+    if (yr.status !== 'complete') w.text('Young student review: not yet decided.');
+    else if (yd.override) w.text(`Young student review: marked complete by Shasta College admin ${fullName(person(yd.admin_id))} on ${when(yr.completedAt)}.`);
+    else {
+      w.text(`Young student review: ${yd.rec === 'recommend' ? 'recommended' : 'not recommended'} by college counselor ${fullName(person(yd.rec_by))} on ${when(yd.rec_at)}${yd.rec_note ? ` (“${yd.rec_note}”)` : ''}.`);
+      w.text(`Approved by Young Student Approver ${fullName(person(yd.admin_id))} on ${when(yr.completedAt)}.`, { x: M + 14 });
+    }
   }
   const cu = p.steps.find((s) => s.id === 7);
   const ud = (cu?.data ?? {}) as { admin_id?: number; note?: string };

@@ -6,10 +6,12 @@ type Course = {
   kind: 'ce' | 'de'; period: string | null; teacher: string | null;
 };
 type Term = { id: number; name: string; opens: string; limit: number };
+/** A typed-in Concurrent Enrollment class. Units stay a string while typing. */
+export type CeRow = { code: string; title: string; units: string; term: number; prereq: boolean };
 
 // Dual Enrollment shows period + teacher; Concurrent courses are just code, title and units.
 const when = (c: Course) => c.kind === 'de'
-  ? [c.period ? `Period ${c.period}` : null, c.teacher].filter(Boolean).join(' · ') || 'At your high school'
+  ? [c.period ? `Period ${c.period}` : null, c.teacher === 'TBD' ? 'Teacher TBD' : c.teacher].filter(Boolean).join(' · ') || 'At your high school'
   : '';
 
 /**
@@ -17,9 +19,10 @@ const when = (c: Course) => c.kind === 'de'
  * and Concurrent Enrollment (taught at Shasta College). Each picked class gets a term; only terms with
  * registration allowed are offered. Unit limits are per term and only show a note when exceeded.
  */
-export function CoursePicker({ courses, initial, terms, ccap, schoolName }: {
+export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolName }: {
   courses: Course[];
   initial: { id: number; term_id: number | null }[];
+  initialCe: CeRow[];
   terms: Term[];
   ccap: boolean;
   schoolName: string;
@@ -28,7 +31,13 @@ export function CoursePicker({ courses, initial, terms, ccap, schoolName }: {
   const [sel, setSel] = useState<Map<number, number>>(
     new Map(initial.map((c) => [c.id, c.term_id && allowed.has(c.term_id) ? c.term_id : terms[0]?.id ?? 0])),
   );
-  const unitsIn = (termId: number) => courses.filter((c) => sel.get(c.id) === termId).reduce((n, c) => n + c.units, 0);
+  const blankCe = (): CeRow => ({ code: '', title: '', units: '', term: terms[0]?.id ?? 0, prereq: false });
+  const [ce, setCe] = useState<CeRow[]>(initialCe.length ? initialCe.map((r) => ({ ...r, term: allowed.has(r.term) ? r.term : terms[0]?.id ?? 0 })) : []);
+  const setRow = (i: number, patch: Partial<CeRow>) => setCe((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  // Term totals count Dual and Concurrent classes together.
+  const unitsIn = (termId: number) =>
+    courses.filter((c) => sel.get(c.id) === termId).reduce((n, c) => n + c.units, 0)
+    + ce.filter((r) => r.term === termId).reduce((n, r) => n + (Number(r.units) > 0 ? Number(r.units) : 0), 0);
   const toggle = (id: number) => setSel((s) => { const n = new Map(s); if (n.has(id)) n.delete(id); else n.set(id, terms[0]?.id ?? 0); return n; });
   const setTerm = (id: number, termId: number) => setSel((s) => new Map(s).set(id, termId));
 
@@ -67,23 +76,43 @@ export function CoursePicker({ courses, initial, terms, ccap, schoolName }: {
           ))}
         </span>
       </div>
-      {(['de', 'ce'] as const).map((kind) => {
-        const list = courses.filter((c) => c.kind === kind);
-        return (
-          <div key={kind} data-kind={kind} style={{ display: 'flex', flexDirection: 'column', marginTop: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', paddingBottom: 6, borderBottom: '2px solid var(--color-text)' }}>
-              <span style={{ fontWeight: 800, fontSize: 17 }}>{kind === 'de' ? 'Dual Enrollment' : 'Concurrent Enrollment'}</span>
-              <span className="ink60" style={{ fontSize: 13 }}>{kind === 'de' ? `Taught at ${schoolName}` : 'Taught at Shasta College'}</span>
-            </div>
-            {list.length === 0 && (
-              <div className="ink60" style={{ fontSize: 14, padding: '10px 0' }}>
-                {kind === 'de' ? 'No Dual Enrollment classes are listed for your school yet.' : 'No Concurrent Enrollment classes are listed yet.'}
-              </div>
-            )}
-            {list.map(row)}
+      <div data-kind="de" style={{ display: 'flex', flexDirection: 'column', marginTop: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', paddingBottom: 6, borderBottom: '2px solid var(--color-text)' }}>
+          <span style={{ fontWeight: 800, fontSize: 17 }}>Dual Enrollment</span>
+          <span className="ink60" style={{ fontSize: 13 }}>Taught at {schoolName}</span>
+        </div>
+        {courses.length === 0 && <div className="ink60" style={{ fontSize: 14, padding: '10px 0' }}>No Dual Enrollment classes are listed for your school yet.</div>}
+        {courses.map(row)}
+      </div>
+      <div data-kind="ce" style={{ display: 'flex', flexDirection: 'column', marginTop: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', paddingBottom: 6, borderBottom: '2px solid var(--color-text)' }}>
+          <span style={{ fontWeight: 800, fontSize: 17 }}>Concurrent Enrollment</span>
+          <span className="ink60" style={{ fontSize: 13 }}>Taught at Shasta College · type in each class</span>
+        </div>
+        <div className="ink60" style={{ fontSize: 13, padding: '8px 0' }}>Enter the course code from the Shasta College schedule (like PSYC C1000) and its units.</div>
+        {ce.map((r, i) => (
+          <div key={i} className="ce-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 1fr) minmax(120px, 1.4fr) 80px 150px auto', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '2px solid var(--color-divider)' }}>
+            <input name="ce_code" className="input" placeholder="PSYC C1000" aria-label={`Course code ${i + 1}`} value={r.code} maxLength={20} required
+              onChange={(e) => setRow(i, { code: e.target.value })} />
+            <input name="ce_title" className="input" placeholder="Course name (optional)" aria-label={`Course name ${i + 1}`} value={r.title} maxLength={100}
+              onChange={(e) => setRow(i, { title: e.target.value })} />
+            <input name="ce_units" className="input" type="number" min={0.5} max={20} step={0.5} placeholder="Units" aria-label={`Units ${i + 1}`} value={r.units} required
+              onChange={(e) => setRow(i, { units: e.target.value })} />
+            <select name="ce_term" className="input" aria-label={`Term for course ${i + 1}`} value={r.term} onChange={(e) => setRow(i, { term: Number(e.target.value) })}>
+              {terms.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button type="button" className="btn btn-ghost" style={{ color: 'var(--color-accent-700)', fontSize: 13 }} onClick={() => setCe((rows) => rows.filter((_, j) => j !== i))}>Remove</button>
+            <input type="hidden" name="ce_prereq" value={r.prereq ? '1' : '0'} />
+            <label style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input type="checkbox" checked={r.prereq} onChange={(e) => setRow(i, { prereq: e.target.checked })} style={{ accentColor: 'var(--color-accent)' }} />
+              This class has a prerequisite (a college counselor will review it)
+            </label>
           </div>
-        );
-      })}
+        ))}
+        <div style={{ paddingTop: 10 }}>
+          <button type="button" className="btn btn-secondary" onClick={() => setCe((rows) => [...rows, blankCe()])}>+ Add a concurrent class</button>
+        </div>
+      </div>
       {terms.filter((t) => unitsIn(t.id) > t.limit).map((t) => (
         <div key={t.id} style={{ fontSize: 13, background: '#fff4e0', color: '#8a4b00', borderLeft: '4px solid #d08a00', padding: '8px 12px', marginTop: 8 }}>
           Note: {unitsIn(t.id)} units in {t.name} is over the usual {t.limit}-unit limit for {ccap ? 'CCAP' : 'non-CCAP'} students. You can still submit; Shasta College will review it when clearing your units.

@@ -23,6 +23,8 @@ export type User = {
   counselor_id: number | null;
   admin_level: 'college' | 'super' | null;
   is_college_counselor: number;
+  /** College admins who make the final call on young students (8th grade and below). */
+  is_young_approver: number;
 };
 
 const COOKIE = 'de_session';
@@ -60,7 +62,7 @@ export async function currentUser(): Promise<User | null> {
   if (!token) return null;
   const row = db()
     .prepare(
-      `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.grad_year, u.grade_confirmed_year, u.signature_file_id, u.retired_at, u.student_number, u.counselor_id, u.admin_level, u.is_college_counselor
+      `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.grad_year, u.grade_confirmed_year, u.signature_file_id, u.retired_at, u.student_number, u.counselor_id, u.admin_level, u.is_college_counselor, u.is_young_approver
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ? AND s.expires_at > ? AND u.disabled = 0`,
     )

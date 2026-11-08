@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireRole } from '@/lib/auth';
-import { activeTerms, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
+import { activeTerms, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
-import { addStudentId, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { addStudentId, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
 import { StudentIdForm } from '@/components/StudentIdForm';
 import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
@@ -18,6 +18,8 @@ const ERRORS: Record<string, string> = {
   id: 'Enter your Shasta College ID (letters, numbers and dashes), or check the box to skip for now.',
   none: 'Pick at least one course.',
   term: 'Pick an open term for every class.',
+  docs: 'Attach both documents (PDF, JPG or PNG, up to 10 MB each).',
+  ce: 'Each concurrent class needs a course code (like PSYC C1000) and units (for example 3 or 4).',
 };
 
 export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string }> }) {
@@ -126,10 +128,10 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
       ['Signed on', fmt(s.completedAt, 'mdy'), `${fmt(s.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded form' : d.method === 'office' ? 'marked complete by Shasta College' : 'e-signature'}`],
       ['Units requested', String(units || '—'), p.termLabel],
     ];
-  } else if (s.id === 4 || s.id === 7 || s.id === 8) {
+  } else if (s.id === 4 || s.id === 7 || s.id === 8 || s.id === 10) {
     cells = [
       s.id === 4 ? ['Approved by', 'Your high school', `${p.school.name} · ${fmt(s.completedAt)}`]
-        : [s.id === 7 ? 'Cleared by' : 'Approved by', s.id === 7 ? 'Shasta College' : 'College counselor', fmt(s.completedAt)],
+        : [s.id === 7 ? 'Cleared by' : 'Approved by', s.id === 8 ? 'College counselor' : 'Shasta College', fmt(s.completedAt)],
       ['Note', d.note ? `“${String(d.note)}”` : '—', ''],
       ['Units approved', String(units), p.termLabel],
     ];
@@ -151,6 +153,12 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
         </div>
       )}
       <Cells cells={cells} />
+      {s.id === 2 && (
+        <form action={reopenCourseSelection} className="pad-sm" style={{ padding: '24px 48px 0', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary">Add or change classes</button>
+          <span className="ink60" style={{ fontSize: 13 }}>Classes that are already approved stay approved. New classes go through the reviews again.</span>
+        </form>
+      )}
       <div className="pad-sm" style={{ padding: '32px 48px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <h4 style={{ margin: 0, fontSize: 15 }}>Included in your packet</h4>
         <PacketTable p={p} />
@@ -170,6 +178,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
     s.status === 'in_review' ? (
       s.id === 7 ? 'Shasta College is checking your courses and unit load. Usually 1–2 days.' :
       s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
+      s.id === 10 ? 'A Shasta College counselor is reviewing your documents, then Shasta College makes the final decision.' :
       'Your high school is reviewing your classes. Check with your high school counselor if you have questions.') :
     s.status === 'waiting_parent' ? (
       p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online or upload a signed form from their own account.` :
@@ -203,12 +212,26 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
             )}
             <CoursePicker
               courses={schoolCourses(p.school.id)}
-              initial={p.courses.map((c) => ({ id: c.id, term_id: c.term_id }))}
+              initial={p.courses.filter((c) => c.kind === 'de').map((c) => ({ id: c.id, term_id: c.term_id }))}
+              initialCe={p.courses.filter((c) => c.kind === 'ce').map((c) => ({ code: c.code, title: c.title === CE_DEFAULT_TITLE ? '' : c.title, units: String(c.units), term: c.term_id ?? 0, prereq: !!c.prerequisite }))}
               terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy'), limit: unitLimit(p.school.designation, t.summer === 1) }))}
               ccap={p.school.designation === 'CCAP'}
               schoolName={p.school.name}
             />
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
+          </form>
+        )}
+        {s.id === 9 && s.status === 'current' && (
+          <form action={submitYoungDocs} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <p style={{ margin: 0, fontSize: 15 }}>
+              Students in 8th grade and below send two documents. A Shasta College counselor reviews them, then Shasta College makes the final decision.
+            </p>
+            <div className="field"><label htmlFor="transcript">A recent transcript or report card</label>
+              <input id="transcript" name="transcript" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required className="input" /></div>
+            <div className="field"><label htmlFor="letter">A letter from your principal saying how you'll benefit from {p.courses.length === 1 ? p.courses[0].code : 'these specific courses'}</label>
+              <input id="letter" name="letter" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required className="input" /></div>
+            <div className="ink60" style={{ fontSize: 13 }}>PDF, JPG or PNG, up to 10 MB each. The letter should name: {p.courses.map((c) => c.code).join(', ') || 'your classes'}.</div>
+            <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Send documents <span>→</span></button></div>
           </form>
         )}
         {s.id === 3 && s.status !== 'complete' && <ParentInvite studentId={p.student.id} studentFirst={p.student.first_name} invited={invited} error={inviteError} />}

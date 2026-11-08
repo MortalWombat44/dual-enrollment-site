@@ -3,7 +3,7 @@ import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { primarySchoolIds } from '@/lib/access';
 import { byTeacher, schoolRoster, type RosterClass } from '@/lib/roster';
-import { allTerms } from '@/lib/workflow';
+import { allTerms, courseWhen } from '@/lib/workflow';
 import { AdminShell } from '@/components/AdminShell';
 
 export const dynamic = 'force-dynamic';
@@ -58,7 +58,7 @@ export default async function Roster({ searchParams }: { searchParams: Promise<S
           ? classes.map((c) => <ClassBlock key={c.id} c={c} />)
           : byTeacher(classes).map((g) => (
             <div key={g.teacher} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h2 style={{ fontSize: 22, margin: 0, paddingBottom: 6, borderBottom: '2px solid var(--color-text)' }}>{g.teacher}</h2>
+              <h2 style={{ fontSize: 22, margin: 0, paddingBottom: 6, borderBottom: '2px solid var(--color-text)' }}>{g.teacher === 'TBD' ? 'Teacher TBD' : g.teacher}</h2>
               {g.classes.map((c) => <ClassBlock key={c.id} c={c} nested />)}
             </div>
           ))}
@@ -76,7 +76,7 @@ function ClassBlock({ c, nested }: { c: RosterClass; nested?: boolean }) {
           <span className="tag tag-neutral" style={{ marginLeft: 8, fontSize: 10 }}>{c.kind === 'de' ? 'DE' : 'CE'}</span>
         </span>
         <span className="ink60" style={{ fontSize: 13 }}>
-          {c.kind === 'de' ? [c.period ? `Period ${c.period}` : null, c.teacher].filter(Boolean).join(' · ') : 'At Shasta College'} · {c.units} units · <strong style={{ color: 'var(--color-text)' }}>{c.students.length} student{c.students.length === 1 ? '' : 's'}</strong>
+          {c.kind === 'de' ? courseWhen(c) : 'At Shasta College'} · {c.units} units · <strong style={{ color: 'var(--color-text)' }}>{c.students.length} student{c.students.length === 1 ? '' : 's'}</strong>
         </span>
       </div>
       {c.students.length === 0 ? (

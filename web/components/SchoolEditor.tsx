@@ -7,7 +7,7 @@ type Des = 'CCAP' | 'NON_CCAP';
 type Step = { id: number; name: string; description: string };
 
 function stepNote(s: Step, mode: Mode, des: Des) {
-  if (s.id === 4 && mode === 'off') return des === 'CCAP' ? 'Pre-approved under the CCAP agreement' : 'Turned off for this school';
+  if (s.id === 4) return des === 'CCAP' ? 'Not used at CCAP schools (set by designation)' : 'Every class, every term (set by designation)';
   return s.description;
 }
 
@@ -72,7 +72,8 @@ export function SchoolEditor({
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', borderTop: '2px solid var(--color-text)' }}>
           {steps.map((s, i) => {
-            const mode = modes[s.id] ?? 'required';
+            // High school approval follows the designation: never at CCAP schools, always at Non-CCAP schools.
+            const mode = s.id === 4 ? (des === 'CCAP' ? 'off' : 'required') : modes[s.id] ?? 'required';
             const off = mode === 'off';
             return (
               <div key={s.id} className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '56px 1fr 320px', alignItems: 'center', padding: '16px 0', borderBottom: '2px solid var(--color-divider)', gap: 8, color: off ? 'var(--ink-55)' : undefined }}>
@@ -81,7 +82,7 @@ export function SchoolEditor({
                 <div className="seg seg-modes" role="radiogroup" aria-label={`${s.name} setting`} style={{ display: 'flex', justifySelf: 'end', color: 'var(--color-text)' }}>
                   {(['required', 'optional', 'off'] as const).map((m) => (
                     <label key={m} className="seg-opt" data-v={m}>
-                      <input type="radio" name={`step_${s.id}`} value={m} checked={mode === m} onChange={() => setModes((x) => ({ ...x, [s.id]: m }))} />
+                      <input type="radio" name={`step_${s.id}`} value={m} checked={mode === m} disabled={s.id === 4 && mode !== m} onChange={() => setModes((x) => ({ ...x, [s.id]: m }))} />
                       {m === 'required' ? 'Required' : m === 'optional' ? 'Optional' : 'Off'}
                     </label>
                   ))}

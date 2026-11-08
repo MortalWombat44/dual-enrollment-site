@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -13,7 +13,7 @@ import { primarySchoolIds } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'units' | 'prereq' | 'school' | 'idreq' | 'ids' | 'all';
+type Tab = 'units' | 'prereq' | 'young' | 'school' | 'idreq' | 'ids' | 'all';
 type SP = { tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const DONE: Record<string, string> = {
@@ -23,6 +23,9 @@ const DONE: Record<string, string> = {
   moved: 'Step marked complete.',
   reopened: 'Step reopened, along with every step after it.',
   course_added: 'Class added to the request.',
+  young_rec: 'Recommendation saved. A Young Student Approver makes the final decision.',
+  young_approved: 'Approved. The student moves on to Clear units.',
+  young_declined: 'Declined. The student sees your note on Course selection.',
   course_removed: 'Class removed from the request.',
   moved_school: 'Student moved to the new school.',
   course_term: 'Class moved to the new term.',
@@ -34,9 +37,14 @@ const DONE: Record<string, string> = {
   id_change_declined: 'ID change request declined.',
 };
 const ERR: Record<string, string> = {
+  ce: 'A concurrent class needs a course code (like PSYC C1000) and units.',
   note: 'Add a note so the student knows what to change.',
   decide: 'Approve or decline every class with a prerequisite.',
   not_counselor: 'Only admins designated as college counselors can approve prerequisites.',
+  not_counselor_young: 'Only admins designated as college counselors can give the recommendation.',
+  not_young_approver: 'Only Young Student Approvers can make the final decision.',
+  same_person: 'The final decision has to come from a different admin than the one who gave the recommendation.',
+  feedback: 'Add your feedback for the approver.',
   id: 'A Shasta College ID uses only letters, numbers and dashes.',
 };
 
@@ -59,12 +67,13 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   const groups: Record<Tab, StudentProgress[]> = {
     units: all.filter((p) => waitingOn(p, 7)),
     prereq: all.filter((p) => waitingOn(p, 8)),
+    young: all.filter((p) => waitingOn(p, 10)),
     school: all.filter((p) => !!openSchoolChange(p.student.id)),
     idreq: all.filter((p) => !!openIdChange(p.student.id)),
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
     all,
   };
-  const tab: Tab = (['prereq', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
+  const tab: Tab = (['prereq', 'young', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
@@ -122,6 +131,9 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
           <div className="seg" style={{ marginBottom: 14 }}>
             <Link className="seg-opt" href={href({ tab: 'units' })} aria-current={tab === 'units'}>Clear units · {groups.units.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'prereq' })} aria-current={tab === 'prereq'}>Prerequisites · {groups.prereq.length}</Link>
+            {(groups.young.length > 0 || tab === 'young') && (
+              <Link className="seg-opt" href={href({ tab: 'young' })} aria-current={tab === 'young'}>Young students · {groups.young.length}</Link>
+            )}
             <Link className="seg-opt" href={href({ tab: 'school' })} aria-current={tab === 'school'}>School changes · {groups.school.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'idreq' })} aria-current={tab === 'idreq'}>ID changes · {groups.idreq.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'ids' })} aria-current={tab === 'ids'}>Shared IDs · {groups.ids.length}</Link>
@@ -186,7 +198,11 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   const units = p.courses.reduce((n, c) => n + c.units, 0);
   const s7 = p.steps.find((s) => s.id === 7);
   const s8 = p.steps.find((s) => s.id === 8);
-  const offered = schoolCourses(p.school.id).filter((c) => !p.courses.some((r) => r.id === c.id));
+  const s9 = p.steps.find((s) => s.id === 9);
+  const s10 = p.steps.find((s) => s.id === 10);
+  const rec = s10?.status === 'in_review' ? youngRecommendation(p.student.id) : null;
+  const recBy = rec ? (db().prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(rec.rec_by) as { first_name: string; last_name: string } | undefined) : undefined;
+  const offered = schoolCourses(p.school.id);
   const consent = p.steps.find((s) => s.id === 3);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -271,6 +287,51 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
+      {s10?.status === 'in_review' && (
+        <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
+          <Hidden p={p} keep={keep} />
+          <div className="kicker accent700">Young student review · {classLabel(p.student)}</div>
+          <div style={{ fontSize: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span>Documents:</span>
+            {s9?.data?.transcript_file_id ? <a href={`/files/${s9.data.transcript_file_id}`} target="_blank" rel="noreferrer">Transcript / report card</a> : <span className="ink60">No transcript on file</span>}
+            {s9?.data?.letter_file_id ? <a href={`/files/${s9.data.letter_file_id}`} target="_blank" rel="noreferrer">Principal's letter</a> : <span className="ink60">No principal letter on file</span>}
+          </div>
+          <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact showUnits={false} />
+          {!rec ? (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>1 · College counselor recommendation</div>
+              {!me.is_college_counselor && <div style={{ fontSize: 13 }}>Waiting on a college counselor. Only admins designated as college counselors can give the recommendation.</div>}
+              <div className="seg seg-modes" role="radiogroup" aria-label="Recommendation" style={{ alignSelf: 'flex-start' }}>
+                <label className="seg-opt" data-v="required"><input type="radio" name="rec" value="recommend" disabled={!me.is_college_counselor} />Recommend</label>
+                <label className="seg-opt" data-v="off"><input type="radio" name="rec" value="not_recommend" disabled={!me.is_college_counselor} />Don't recommend</label>
+              </div>
+              <div className="field"><label htmlFor="n10r">Feedback for the approver (required)</label><textarea id="n10r" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
+              <button formAction={recommendYoung} className="btn btn-primary" disabled={!me.is_college_counselor} style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save recommendation <span>→</span></button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 14, borderLeft: '4px solid var(--color-accent)', paddingLeft: 10 }}>
+                <strong>{rec.rec === 'recommend' ? 'Recommended' : 'Not recommended'}</strong> by {recBy ? `${recBy.first_name} ${recBy.last_name}` : 'a college counselor'} · {fmt(rec.rec_at)}
+                <div style={{ marginTop: 4 }}>“{rec.rec_note}”</div>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>2 · Final decision</div>
+              {!me.is_young_approver ? <div style={{ fontSize: 13 }}>Waiting on a Young Student Approver.</div>
+                : rec.rec_by === me.id ? <div style={{ fontSize: 13 }}>You gave the recommendation, so another Young Student Approver makes the final decision.</div> : null}
+              {me.is_young_approver && rec.rec_by !== me.id && (
+                <>
+                  <div className="seg seg-modes" role="radiogroup" aria-label="Final decision" style={{ alignSelf: 'flex-start' }}>
+                    <label className="seg-opt" data-v="required"><input type="radio" name="decision" value="approve" />Approve</label>
+                    <label className="seg-opt" data-v="off"><input type="radio" name="decision" value="decline" />Decline</label>
+                  </div>
+                  <div className="field"><label htmlFor="n10d">Note to student (required if you decline)</label><textarea id="n10d" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} /></div>
+                  <button formAction={decideYoung} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decision <span>→</span></button>
+                </>
+              )}
+            </>
+          )}
+        </form>
+      )}
+
       <div className="pad-sm" style={section}>
         <div className="kicker">Steps · move forward or back</div>
         {p.steps.map((s) => (
@@ -298,9 +359,10 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
       <div className="pad-sm" style={section}>
         <div className="kicker">Classes requested · {units} units</div>
         {p.courses.map((c) => (
-          <form key={c.id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px auto auto', gap: 6, alignItems: 'center', fontSize: 14 }}>
+          <form key={`${c.id}-${c.term_id}`} style={{ display: 'grid', gridTemplateColumns: '1fr 120px auto auto', gap: 6, alignItems: 'center', fontSize: 14 }}>
             <Hidden p={p} keep={keep} />
             <input type="hidden" name="courseId" value={c.id} />
+            <input type="hidden" name="fromTermId" value={c.term_id ?? ''} />
             <span><strong>{c.code}</strong> · {c.units} units</span>
             <select name="termId" className="input" defaultValue={c.term_id ?? ''} aria-label={`Term for ${c.code}`} style={{ minHeight: 30, padding: '2px 6px', fontSize: 13 }}>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current === 1 ? '' : ' (closed)'}</option>)}
@@ -313,8 +375,8 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <form style={{ display: 'flex', gap: 8 }}>
             <Hidden p={p} keep={keep} />
             <select name="courseId" className="input" required defaultValue="">
-              <option value="" disabled>Request a class for this student…</option>
-              {offered.map((c) => <option key={c.id} value={c.id}>{c.kind === 'de' ? 'DE' : 'CE'} · {c.code} · {c.title} ({c.units})</option>)}
+              <option value="" disabled>Request a Dual Enrollment class…</option>
+              {offered.map((c) => <option key={c.id} value={c.id}>DE · {c.code} · {c.title} ({c.units})</option>)}
             </select>
             <select name="termId" className="input" defaultValue={p.term.id} aria-label="Term" style={{ width: 140 }}>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current === 1 ? '' : ' (closed)'}</option>)}
@@ -322,6 +384,15 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
             <button formAction={adminAddCourse} className="btn btn-secondary">Add</button>
           </form>
         )}
+        <form style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Hidden p={p} keep={keep} />
+          <input name="ce_code" className="input" placeholder="Concurrent class, e.g. PSYC C1000" aria-label="Concurrent course code" required maxLength={20} style={{ flex: '1 1 180px' }} />
+          <input name="ce_units" className="input" type="number" min={0.5} max={20} step={0.5} placeholder="Units" aria-label="Concurrent units" required style={{ width: 90 }} />
+          <select name="termId" className="input" defaultValue={p.term.id} aria-label="Term for concurrent class" style={{ width: 140 }}>
+            {terms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_current === 1 ? '' : ' (closed)'}</option>)}
+          </select>
+          <button formAction={adminAddCourse} className="btn btn-secondary">Add concurrent</button>
+        </form>
       </div>
 
       <form className="pad-sm" style={section}>

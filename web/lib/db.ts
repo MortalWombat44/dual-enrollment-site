@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
   counselor_id INTEGER REFERENCES users(id),
   admin_level TEXT CHECK (admin_level IN ('college','super')),
   is_college_counselor INTEGER NOT NULL DEFAULT 0,
+  is_young_approver INTEGER NOT NULL DEFAULT 0, -- college admins who make the final call on young students (8th grade and below)
   staff_type TEXT CHECK (staff_type IN ('counselor','admin','teacher','other')), -- high school staff only, for record keeping
   share_with_parents INTEGER NOT NULL DEFAULT 0,
   disabled INTEGER NOT NULL DEFAULT 0, -- super admins can switch off access
@@ -107,7 +108,14 @@ CREATE TABLE IF NOT EXISTS course_requests (
   student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   course_id INTEGER NOT NULL REFERENCES courses(id),
   term_id INTEGER REFERENCES terms(id),
-  PRIMARY KEY (student_id, course_id)
+  -- High school approval is per class, per term (Non-CCAP schools only).
+  hs_status TEXT NOT NULL DEFAULT 'pending' CHECK (hs_status IN ('pending','approved')),
+  hs_by INTEGER REFERENCES users(id),
+  hs_at TEXT,
+  hs_signed_name TEXT,
+  hs_signature_file_id INTEGER,
+  hs_sign_method TEXT,
+  PRIMARY KEY (student_id, course_id, term_id)
 );
 CREATE TABLE IF NOT EXISTS files (
   id INTEGER PRIMARY KEY,
@@ -161,6 +169,14 @@ CREATE TABLE IF NOT EXISTS id_change_requests (
   handled_by INTEGER REFERENCES users(id),
   handled_at TEXT
 );
+-- Young student review (step 10): the college counselor's recommendation, waiting for the approver's decision.
+CREATE TABLE IF NOT EXISTS young_reviews (
+  student_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  rec_by INTEGER NOT NULL REFERENCES users(id),
+  rec TEXT NOT NULL CHECK (rec IN ('recommend','not_recommend')),
+  rec_note TEXT NOT NULL,
+  rec_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -179,6 +195,9 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
   { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'E-signature or uploaded signed form' },
   { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
   { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
+  // Young students (8th grade and below) only: documents, then a college counselor recommends and an approver decides.
+  { id: 9, name: 'Young student documents', short: 'Young student documents', description: 'Report card or transcript, and a letter from the principal (8th grade and below only)' },
+  { id: 10, name: 'Young student review', short: 'Young student review', description: 'A college counselor recommends, then a Young Student Approver decides (8th grade and below only)' },
   // Steps 7 and 8 were added later, so their ids are out of order: this array's order is the workflow order.
   { id: 7, name: 'Clear units', short: 'Clear units', description: 'Shasta College checks the courses and unit load' },
   { id: 8, name: 'Prerequisite review', short: 'Prerequisite review', description: 'A college counselor approves classes that have a prerequisite (only shown when one is requested)' },
@@ -188,8 +207,8 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
 ];
 
 export const DEFAULT_MODES: Record<'CCAP' | 'NON_CCAP', Record<number, Mode>> = {
-  CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'off', 5: 'required', 6: 'optional' },
-  NON_CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'required', 5: 'required', 6: 'required' },
+  CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'off', 5: 'required', 6: 'optional', 9: 'required', 10: 'required' },
+  NON_CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'required', 5: 'required', 6: 'required', 9: 'required', 10: 'required' },
 };
 
 let _db: DatabaseSync | null = null;
@@ -220,6 +239,7 @@ export function db(): Db {
     ensureAccounts(conn);
     // Class requests made before classes had terms get the student's term.
     conn.exec('UPDATE course_requests SET term_id = (SELECT term_id FROM enrollments e WHERE e.student_id = course_requests.student_id) WHERE term_id IS NULL');
+    if (count.n === 0) approveFromStepFour(conn);
     _db = conn;
   }
   const conn = _db;
@@ -262,7 +282,7 @@ function seed(d: DatabaseSync) {
 
   const schools: [string, string, 'CCAP' | 'NON_CCAP', string | null, string | null][] = [
     ['Anderson High School', 'Anderson Union HSD', 'CCAP', 'CCAP-AUHSD-2025', '2028-06-30'],
-    ['Enterprise High School', 'Shasta Union HSD', 'CCAP', 'CCAP-SUHSD-2024', '2027-06-30'],
+    ['Enterprise High School', 'Shasta Union HSD', 'NON_CCAP', null, null], // Non-CCAP in the test data, so high school approval can be tried
     ['Foothill High School', 'Shasta Union HSD', 'CCAP', 'CCAP-SUHSD-2024', '2027-06-30'],
     ['Shasta High School', 'Shasta Union HSD', 'CCAP', 'CCAP-SUHSD-2024', '2027-06-30'],
     ['University Preparatory', 'Redding School District', 'NON_CCAP', null, null],
@@ -276,10 +296,7 @@ function seed(d: DatabaseSync) {
     const id = Number(r.lastInsertRowid);
     schoolIds[name] = id;
     for (const s of STEP_DEFS) {
-      let mode = DEFAULT_MODES[des][s.id];
-      // Enterprise HS keeps counselor approval on (matches the student/counselor screens).
-      if (name === 'Enterprise High School' && s.id === 4) mode = 'required';
-      if (name === 'Shasta High School' && s.id === 4) mode = 'required';
+      const mode = DEFAULT_MODES[des][s.id];
       const note =
         s.id === 4 && mode === 'off' ? 'Pre-approved under the CCAP agreement' : null;
       insMode.run(id, s.id, mode, note);
@@ -304,16 +321,14 @@ function seed(d: DatabaseSync) {
   d.prepare('UPDATE courses SET prerequisite = ? WHERE code = ?').run('Eligibility for ENGL 1A', 'AJ 1');
   // Dual Enrollment sections taught at each high school (placeholders).
   const insDE = d.prepare("INSERT INTO courses (code, title, units, schedule, kind, school_id, period, teacher, prerequisite) VALUES (?,?,?,'',  'de',?,?,?,?)");
-  const de: [string, string, string, number, string, string, string | null][] = [
-    ['Enterprise High School', 'ENGL 1A', 'College Composition', 3, '2', 'Mr. Hall', null],
-    ['Enterprise High School', 'HIST 17', 'United States History', 3, '5', 'Ms. Brennan', null],
-    ['Anderson High School', 'ENGL 1A', 'College Composition', 3, '3', 'Ms. Grant', null],
-    ['Foothill High School', 'PSY 1', 'General Psychology', 3, '1', 'Mr. Lane', null],
-    ['Shasta High School', 'COMM 1', 'Public Speaking', 3, '4', 'Ms. Reyes', null],
-    ['University Preparatory', 'MATH 13', 'Introduction to Statistics', 4, '6', 'Mr. Cho', 'Intermediate algebra (or math placement)'],
-    ['Fall River High School', 'AJ 1', 'Introduction to Administration of Justice', 3, '2', 'Mrs. Pike', 'Eligibility for ENGL 1A'],
+  // Every test school offers the same four Dual Enrollment classes; period and teacher TBD (units are placeholders).
+  const de: [string, string, number][] = [
+    ['PSYC C1000', 'Introduction to Psychology', 3],
+    ['ENGL C1000', 'Academic Reading and Writing', 3],
+    ['STAT C1000', 'Introduction to Statistics', 4],
+    ['MATH C2210', 'Single Variable Calculus I', 4],
   ];
-  for (const [school, code, title, units, period, teacher, prereq] of de) insDE.run(code, title, units, schoolIds[school], period, teacher, prereq);
+  for (const sid of Object.values(schoolIds)) for (const [code, title, units] of de) insDE.run(code, title, units, sid, 'TBD', 'TBD', null);
 
   const pw = hashPassword('shasta2027');
   const insUser = d.prepare(`INSERT INTO users (first_name, last_name, email, role, school_id, status, title, password_hash, invite_token, grade, student_number, counselor_id)
@@ -328,6 +343,7 @@ function seed(d: DatabaseSync) {
   d.prepare("UPDATE users SET admin_level = 'super' WHERE id = ?").run(dana);
   // Jordan is also designated as a college counselor, so they review prerequisite requests.
   d.prepare("UPDATE users SET admin_level = 'college', is_college_counselor = 1 WHERE id = ?").run(jordan);
+  d.prepare('UPDATE users SET is_young_approver = 1 WHERE id = ?').run(dana);
   const alvarez = user('Rosa', 'Alvarez', 'ralvarez@suhsd.net', 'counselor', enterprise, { title: 'Ms.' });
   user('Tom', 'Becker', 'tbecker@andersonhigh.org', 'counselor', anderson, { status: 'invited', title: 'Mr.' });
   d.exec("UPDATE users SET staff_type = 'counselor' WHERE role = 'counselor'");
@@ -410,9 +426,9 @@ function seed(d: DatabaseSync) {
   d.prepare('INSERT INTO school_change_requests (student_id, from_school_id, to_school_id, note) VALUES (?,?,?,?)')
     .run(ava, enterprise, schoolIds['Shasta High School'], 'I transferred to Shasta High in October.');
   // Some students picked Enterprise's Dual Enrollment sections (taught on campus) instead of the college's.
-  for (const [email, code] of [['maya.r@student.suhsd.net', 'ENGL 1A'], ['lucas.h@student.suhsd.net', 'ENGL 1A'], ['ethan.b@student.suhsd.net', 'HIST 17']]) {
+  for (const [email, from, to] of [['maya.r@student.suhsd.net', 'ENGL 1A', 'ENGL C1000'], ['lucas.h@student.suhsd.net', 'ENGL 1A', 'ENGL C1000']]) {
     d.prepare(`UPDATE course_requests SET course_id = (SELECT id FROM courses WHERE kind = 'de' AND school_id = ? AND code = ?)
-      WHERE student_id = (SELECT id FROM users WHERE email = ?) AND course_id = ?`).run(enterprise, code, email, courseIds[code]);
+      WHERE student_id = (SELECT id FROM users WHERE email = ?) AND course_id = ?`).run(enterprise, to, email, courseIds[from]);
   }
 
   // Graduation years (2026–27 school year: seniors are the class of 2027), plus alumni to retire.
@@ -445,12 +461,24 @@ export function cryptoToken() {
   return crypto.randomBytes(24).toString('base64url');
 }
 
+/** Classes of students whose (old, whole-plan) high school approval was done count as approved. */
+function approveFromStepFour(d: DatabaseSync) {
+  const rows = d.prepare("SELECT student_id, completed_at, data FROM step_progress WHERE step_id = 4 AND status = 'complete'").all() as { student_id: number; completed_at: string; data: string | null }[];
+  const up = d.prepare(`UPDATE course_requests SET hs_status = 'approved', hs_by = ?, hs_at = ?, hs_signed_name = ?, hs_signature_file_id = ?, hs_sign_method = ?
+    WHERE student_id = ? AND hs_status = 'pending'`);
+  for (const r of rows) {
+    const x = r.data ? JSON.parse(r.data) : {};
+    up.run(x.counselor_id ?? x.admin_id ?? null, x.signed_at ?? r.completed_at, x.signed_name ?? null, x.signature_file_id ?? null, x.sign_method ?? null, r.student_id);
+  }
+}
+
 /** Adds columns introduced after a database was first created. */
 function migrate(d: DatabaseSync) {
   const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('retired_at')) d.exec('ALTER TABLE users ADD COLUMN retired_at TEXT');
   if (!cols.includes('signature_file_id')) d.exec('ALTER TABLE users ADD COLUMN signature_file_id INTEGER');
+  if (!cols.includes('is_young_approver')) d.exec('ALTER TABLE users ADD COLUMN is_young_approver INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('grade_confirmed_year')) {
     d.exec('ALTER TABLE users ADD COLUMN grade_confirmed_year INTEGER');
     // Students already here count as confirmed for this school year; they're asked again next July.
@@ -485,6 +513,23 @@ function migrate(d: DatabaseSync) {
   }
   const reqCols = (d.prepare('PRAGMA table_info(course_requests)').all() as { name: string }[]).map((c) => c.name);
   if (!reqCols.includes('term_id')) d.exec('ALTER TABLE course_requests ADD COLUMN term_id INTEGER REFERENCES terms(id)');
+  if (!reqCols.includes('hs_status')) {
+    // High school approval moved from one step to each class per term: rebuild the table (its key now includes the term).
+    d.exec(`
+      CREATE TABLE course_requests_new (
+        student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        course_id INTEGER NOT NULL REFERENCES courses(id),
+        term_id INTEGER REFERENCES terms(id),
+        hs_status TEXT NOT NULL DEFAULT 'pending' CHECK (hs_status IN ('pending','approved')),
+        hs_by INTEGER REFERENCES users(id), hs_at TEXT, hs_signed_name TEXT, hs_signature_file_id INTEGER, hs_sign_method TEXT,
+        PRIMARY KEY (student_id, course_id, term_id)
+      );
+      INSERT INTO course_requests_new (student_id, course_id, term_id) SELECT student_id, course_id, term_id FROM course_requests;
+      DROP TABLE course_requests;
+      ALTER TABLE course_requests_new RENAME TO course_requests;
+    `);
+    approveFromStepFour(d);
+  }
   const courseCols = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
   if (!courseCols.includes('prerequisite')) d.exec('ALTER TABLE courses ADD COLUMN prerequisite TEXT');
   // Courses split into Concurrent (college) and Dual (per high school). Existing courses become Concurrent.
@@ -495,9 +540,9 @@ function migrate(d: DatabaseSync) {
     d.exec('ALTER TABLE courses ADD COLUMN teacher TEXT');
     d.exec('ALTER TABLE courses ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
   }
-  // Steps 7 (Clear units) and 8 (Prerequisite review) arrived after launch: add them, on for every school.
+  // Steps 7 (Clear units), 8 (Prerequisite review), 9 + 10 (young students) arrived after launch: add them, on for every school.
   if (d.prepare('SELECT 1 FROM steps WHERE id = 1').get()) {
-    for (const id of [7, 8]) {
+    for (const id of [7, 8, 9, 10]) {
       if (d.prepare('SELECT 1 FROM steps WHERE id = ?').get(id)) continue;
       const def = STEP_DEFS.find((x) => x.id === id)!;
       d.prepare('INSERT INTO steps (id, name, short_name, description) VALUES (?,?,?,?)').run(def.id, def.name, def.short, def.description);

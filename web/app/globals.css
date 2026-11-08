@@ -361,6 +361,9 @@ a.seg-opt[aria-current='true'] { background: var(--color-text); color: var(--col
 /* ── responsive helpers ─────────────────────────────────── */
 .only-mobile { display: none; }
 @media (max-width: 720px) {
+  .ce-row { grid-template-columns: 1fr 90px !important; }
+  .ce-row > input[name="ce_title"], .ce-row > select { grid-column: 1 / -1; }
+  .ce-row > input[name="ce_title"] { order: 3; } .ce-row > select { order: 4; } .ce-row > button { order: 6; justify-self: start; } .ce-row > label { order: 5; }
   .only-desktop { display: none !important; }
   .only-mobile { display: flex; }
   .topbar { padding: 14px 16px; }

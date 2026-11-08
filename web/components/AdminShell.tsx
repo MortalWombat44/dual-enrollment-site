@@ -27,7 +27,7 @@ export function AdminShell({ me, current, children }: { me: User; current: 'stud
         </nav>
         <div className="admin-me">
           {me.first_name} {me.last_name}<br />
-          <span style={{ color: 'var(--color-neutral-300)' }}>{isSuper ? 'Super admin' : 'College admin'}{me.is_college_counselor ? ' · College counselor' : ''}</span>
+          <span style={{ color: 'var(--color-neutral-300)' }}>{isSuper ? 'Super admin' : 'College admin'}{me.is_college_counselor ? ' · College counselor' : ''}{me.is_young_approver ? ' · Young Student Approver' : ''}</span>
           <form action={logout}><button>Sign out</button></form>
         </div>
       </div>

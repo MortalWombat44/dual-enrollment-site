@@ -39,8 +39,9 @@ export async function addUser(formData: FormData) {
       ? (db().prepare("SELECT id FROM users WHERE role = 'counselor' AND school_id = ? ORDER BY status = 'active' DESC, id LIMIT 1").get(schoolId) as { id: number } | undefined)?.id ?? null
       : null;
     const r = db()
-      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor, staff_type) VALUES (?,?,?,?,?,'invited',?,?,?,?,?)")
-      .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor, role === 'admin' ? level : null, collegeCounselor, staffType);
+      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor, is_young_approver, staff_type) VALUES (?,?,?,?,?,'invited',?,?,?,?,?,?)")
+      .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor, role === 'admin' ? level : null, collegeCounselor,
+        role === 'admin' && formData.get('young_approver') === 'on' ? 1 : 0, staffType);
     const uid = Number(r.lastInsertRowid);
     if (role === 'student') {
       const termId = Number(formData.get('term'));
@@ -83,6 +84,7 @@ export async function saveSchool(formData: FormData) {
     const m = String(formData.get(`step_${s.id}`) || '');
     modes[s.id] = (MODES as readonly string[]).includes(m) ? m : 'required';
   }
+  modes[4] = des === 'CCAP' ? 'off' : 'required';
   if (!Object.values(modes).includes('required')) redirect(`/admin/schools/${id}?error=required`);
   tx(() => {
     db().prepare('UPDATE schools SET designation = ?, agreement_id = ?, agreement_expires = ? WHERE id = ?').run(
@@ -130,7 +132,8 @@ export async function updateAdmin(formData: FormData) {
   if (id === me.id && level !== 'super') redirect('/admin/users?role=admin&error=self');
   const primary = formData.getAll('primary').map(Number).filter((n) => n > 0);
   tx(() => {
-    db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ? WHERE id = ?').run(level, formData.get('college_counselor') === 'on' ? 1 : 0, id);
+    db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ?, is_young_approver = ? WHERE id = ?')
+      .run(level, formData.get('college_counselor') === 'on' ? 1 : 0, formData.get('young_approver') === 'on' ? 1 : 0, id);
     db().prepare('DELETE FROM admin_schools WHERE admin_id = ?').run(id);
     const ins = db().prepare('INSERT INTO admin_schools (admin_id, school_id) SELECT ?, id FROM schools WHERE id = ?');
     for (const sid of primary) ins.run(id, sid);

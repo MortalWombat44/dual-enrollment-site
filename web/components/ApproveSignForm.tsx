@@ -18,17 +18,24 @@ async function typedToPng(name: string): Promise<string> {
   return c.toDataURL('image/png');
 }
 
+export type PendingClass = { id: number; term_id: number | null; code: string; title: string; term_name: string | null };
+
 /**
- * High school approval: "Approve & sign digitally". Staff use their saved signature, draw one, or type their name
- * (shown in cursive). "Request changes" doesn't need a signature.
+ * High school approval, one decision per class per term, then "Approve & sign digitally" once for the batch.
+ * Staff use their saved signature, draw one, or type their name (shown in cursive). Declining needs a note.
  */
-export function ApproveSignForm({ studentId, staffName, savedUrl, approve, sendBack }: {
+export function ApproveSignForm({ studentId, staffName, savedUrl, pending, approve }: {
   studentId: number;
   staffName: string;
   savedUrl: string | null;
+  pending: PendingClass[];
   approve: (fd: FormData) => Promise<void>;
-  sendBack: (fd: FormData) => Promise<void>;
 }) {
+  const key = (c: PendingClass) => `d_${c.id}_${c.term_id ?? 0}`;
+  const [dec, setDec] = useState<Record<string, 'approve' | 'decline'>>(() => Object.fromEntries(pending.map((c) => [key(c), 'approve'])));
+  const get = (c: PendingClass) => dec[key(c)] ?? 'approve';
+  const anyApproved = pending.some((c) => get(c) === 'approve');
+  const anyDeclined = pending.some((c) => get(c) === 'decline');
   const [mode, setMode] = useState<'saved' | 'draw' | 'type'>(savedUrl ? 'saved' : 'draw');
   const [drawn, setDrawn] = useState('');
   const [typed, setTyped] = useState(staffName);
@@ -40,7 +47,7 @@ export function ApproveSignForm({ studentId, staffName, savedUrl, approve, sendB
     return () => { live = false; };
   }, [mode, typed]);
   const signature = mode === 'draw' ? drawn : mode === 'type' ? typedPng : '';
-  const ready = mode === 'saved' || !!signature;
+  const ready = !anyApproved || mode === 'saved' || !!signature;
 
   return (
     <form style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -48,11 +55,24 @@ export function ApproveSignForm({ studentId, staffName, savedUrl, approve, sendB
       <input type="hidden" name="sign_mode" value={mode} />
       <input type="hidden" name="signature" value={signature} />
       <input type="hidden" name="signed_name" value={mode === 'type' ? typed.trim() : staffName} />
-      <div className="field pad-sm" style={{ padding: '20px 32px 8px' }}>
-        <label htmlFor="note">Note to student (optional for approval, required for changes)</label>
-        <textarea id="note" name="note" className="input" maxLength={1000} style={{ minHeight: 64, resize: 'none' }} />
+      <div className="pad-sm" style={{ padding: '20px 32px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="kicker-sm">Decide each class</div>
+        {pending.map((c) => (
+          <div key={key(c)} data-class={c.code} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14, padding: '6px 0', borderBottom: '1px solid var(--color-divider)' }}>
+            <span><strong>{c.code}</strong> · {c.title}<span className="ink60"> · {c.term_name ?? 'No term'}</span></span>
+            <input type="hidden" name={key(c)} value={get(c)} />
+            <div className="seg seg-ink" role="radiogroup" aria-label={`Decision for ${c.code}`}>
+              <label className="seg-opt"><input type="radio" checked={get(c) === 'approve'} onChange={() => setDec({ ...dec, [key(c)]: 'approve' })} />Approve</label>
+              <label className="seg-opt"><input type="radio" checked={get(c) === 'decline'} onChange={() => setDec({ ...dec, [key(c)]: 'decline' })} />Decline</label>
+            </div>
+          </div>
+        ))}
       </div>
-      <div className="pad-sm" style={{ padding: '8px 32px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="field pad-sm" style={{ padding: '12px 32px 8px' }}>
+        <label htmlFor="note">Note to student {anyDeclined ? '(required: say why a class was declined)' : '(optional)'}</label>
+        <textarea id="note" name="note" className="input" maxLength={1000} required={anyDeclined} style={{ minHeight: 64, resize: 'none' }} />
+      </div>
+      {anyApproved && <div className="pad-sm" style={{ padding: '8px 32px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="kicker-sm">Your signature</div>
         <div className="seg seg-ink" role="radiogroup" aria-label="How to sign" style={{ alignSelf: 'flex-start' }}>
           {savedUrl && <label className="seg-opt"><input type="radio" checked={mode === 'saved'} onChange={() => setMode('saved')} />Saved</label>}
@@ -77,10 +97,11 @@ export function ApproveSignForm({ studentId, staffName, savedUrl, approve, sendB
             <input type="checkbox" name="save_signature" defaultChecked style={{ accentColor: 'var(--color-accent)' }} /> Save as my signature for next time
           </label>
         )}
-      </div>
+      </div>}
       <div className="pad-sm" style={{ marginTop: 'auto', padding: '16px 32px 28px', display: 'flex', flexDirection: 'column', gap: 8, borderTop: '2px solid var(--color-text)' }}>
-        <button formAction={approve} disabled={!ready} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Approve &amp; sign digitally <span>→</span></button>
-        <button formAction={sendBack} className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Request changes</button>
+        <button formAction={approve} disabled={!ready} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>
+          {anyApproved ? (anyDeclined ? 'Save decisions & sign digitally' : 'Approve & sign digitally') : 'Decline & send back'} <span>→</span>
+        </button>
       </div>
     </form>
   );

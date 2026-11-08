@@ -1,12 +1,11 @@
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { AdminShell, AdminHead } from '@/components/AdminShell';
-import { CourseEditor } from '@/components/CourseEditor';
 import { Flash } from '@/components/chrome';
 
 export const dynamic = 'force-dynamic';
 
-/** Concurrent Enrollment courses (taught at Shasta College), plus links to each school's Dual Enrollment list. */
+/** Links to each school's Dual Enrollment list. Concurrent Enrollment classes are typed in by students. */
 export default async function CoursesPage({ searchParams }: { searchParams: Promise<{ course_saved?: string; course_removed?: string; course_error?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
@@ -17,9 +16,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       <AdminHead title="Courses" />
       <Flash msg={sp.course_saved ? 'Course saved.' : sp.course_removed ? 'Course removed from new requests.' : null} />
       <Flash error msg={sp.course_error ? 'A course needs a code, a title and units.' : null} />
-      <div className="pad-sm" style={{ padding: '24px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="pad-sm" style={{ padding: '24px 40px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="kicker">Concurrent Enrollment · taught at Shasta College</div>
-        <CourseEditor />
+        <div style={{ fontSize: 14 }}>No list to keep up: students type in each concurrent class (course code and units) when they pick classes.</div>
       </div>
       <div className="pad-sm" style={{ padding: '8px 40px 40px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="kicker">Dual Enrollment · taught at each high school</div>

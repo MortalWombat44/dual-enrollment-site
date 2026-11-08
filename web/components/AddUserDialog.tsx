@@ -83,7 +83,11 @@ export function AddUserDialog({ action, schools, terms, gradYears, error }: { ac
               </div>
               <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
                 <input type="checkbox" name="college_counselor" style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
-                College counselor (approves classes with a prerequisite)
+                College counselor (approves classes with a prerequisite, recommends on young students)
+              </label>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                <input type="checkbox" name="young_approver" style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+                Young Student Approver (final decision for students in 8th grade and below)
               </label>
             </>
           )}

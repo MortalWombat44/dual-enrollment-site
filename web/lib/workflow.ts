@@ -27,7 +27,15 @@ export type Course = {
   kind: 'ce' | 'de'; school_id: number | null; period: string | null; teacher: string | null; active: number;
 };
 /** A requested class, with the term the student asked to take it in. */
-export type RequestedCourse = Course & { term_id: number | null; term_name: string | null };
+export type RequestedCourse = Course & {
+  term_id: number | null; term_name: string | null;
+  /** High school approval for this class in this term (Non-CCAP schools). */
+  hs_status: 'pending' | 'approved'; hs_by: number | null; hs_at: string | null;
+  hs_signed_name: string | null; hs_signature_file_id: number | null; hs_sign_method: string | null;
+};
+
+/** CCAP schools never use high school approval; Non-CCAP schools always do (per class, per term). */
+export const hsApprovalMode = (designation: 'CCAP' | 'NON_CCAP'): Mode => (designation === 'CCAP' ? 'off' : 'required');
 
 export type StudentStep = {
   id: number; // canonical step id (1–6)
@@ -143,6 +151,8 @@ export function getProgress(studentId: number): StudentProgress | null {
     | undefined;
   const homeTerm = (enr && getTerm(enr.term_id)) || currentTerm();
   const modes: Record<number, Mode> = enr?.step_modes ? JSON.parse(enr.step_modes) : schoolModes(school.id);
+  modes[4] = hsApprovalMode(school.designation); // set by school type, never by saved settings
+  modes[9] = 'required'; modes[10] = 'required'; // young student review is policy, not a school setting
   const prog = new Map(
     (d.prepare('SELECT step_id, status, completed_at, seen, data FROM step_progress WHERE student_id = ?').all(studentId) as {
       step_id: number; status: string; completed_at: string; seen: number; data: string | null;
@@ -151,7 +161,8 @@ export function getProgress(studentId: number): StudentProgress | null {
   // A reviewer (Clear units, Prerequisite review or High school approval) sent the courses back.
   const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;
   const courses = d
-    .prepare(`SELECT c.*, r.term_id, t.name AS term_name FROM course_requests r JOIN courses c ON c.id = r.course_id
+    .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method
+              FROM course_requests r JOIN courses c ON c.id = r.course_id
               LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? ORDER BY t.registration_opens, c.code`)
     .all(studentId) as RequestedCourse[];
   // Classes carry their own term. The Register step follows the earliest registration date among them;
@@ -163,6 +174,7 @@ export function getProgress(studentId: number): StudentProgress | null {
   const termLabel = requestTerms.length ? requestTerms.map((t) => t.name).join(' + ') : homeTerm.name;
   // Prerequisite review only applies when a requested class has a prerequisite (or it already ran).
   const needsPrereq = courses.some((c) => c.prerequisite) || (prog.has(8) && prog.get(8)!.status === 'complete');
+  const young = isYoung(student);
   const regOpen = new Date(term.registration_opens).getTime() <= Date.now();
 
   const steps: StudentStep[] = [];
@@ -171,22 +183,27 @@ export function getProgress(studentId: number): StudentProgress | null {
     const mode = modes[def.id] ?? 'required';
     if (mode === 'off') continue;
     if (def.id === 8 && !needsPrereq) continue;
+    if ((def.id === 9 || def.id === 10) && !young) continue; // young students (8th grade and below) only
     const p = prog.get(def.id);
-    const isComplete = p?.status === 'complete';
+    // High school approval is done only when every requested class (every term) is approved,
+    // so adding classes later (e.g. next term) opens it again for just those classes.
+    const hsDone = courses.length > 0 && courses.every((c) => c.hs_status === 'approved');
+    const isComplete = def.id === 4 ? hsDone : p?.status === 'complete';
+    const hsAt = def.id === 4 && hsDone ? courses.map((c) => c.hs_at ?? '').sort().at(-1) || p?.completed_at || null : null;
     let status: StepStatus;
     if (isComplete) status = 'complete';
     else if (blocked) status = 'locked';
     else if (def.id === 2 && changeRow) status = 'changes';
     else if (def.id === 3) status = 'waiting_parent';
-    else if (def.id === 4 || def.id === 7 || def.id === 8) status = 'in_review';
+    else if (def.id === 4 || def.id === 7 || def.id === 8 || def.id === 10) status = 'in_review';
     else if (def.id === 5 && !regOpen) status = 'scheduled';
     else status = 'current';
     if (!isComplete && mode === 'required') blocked = true;
     steps.push({
       id: def.id, num: steps.length + 1, name: def.name, short: def.short, description: def.description,
-      mode, status, completedAt: isComplete ? p!.completed_at : null,
+      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : p!.completed_at) : null,
       data: isComplete && p?.data ? JSON.parse(p.data) : null,
-      seen: !isComplete || p!.seen === 1,
+      seen: !isComplete || !p || p.seen === 1,
     });
   }
   const complete = steps.filter((s) => s.status === 'complete').length;
@@ -204,6 +221,12 @@ export function getProgress(studentId: number): StudentProgress | null {
 }
 
 /** Marks a step complete. The first completed step snapshots the school's step rules for this student. */
+/** Young student review (step 10): the college counselor's recommendation, saved before the final decision. */
+export type YoungRec = { rec_by: number; rec: 'recommend' | 'not_recommend'; rec_note: string; rec_at: string };
+export function youngRecommendation(studentId: number): YoungRec | null {
+  return (db().prepare('SELECT rec_by, rec, rec_note, rec_at FROM young_reviews WHERE student_id = ?').get(studentId) as YoungRec | undefined) ?? null;
+}
+
 export function completeStep(studentId: number, stepId: number, data: Record<string, unknown> | null, bySomeoneElse = false) {
   const d = db();
   tx(() => {
@@ -228,8 +251,9 @@ export function completeStep(studentId: number, stepId: number, data: Record<str
 export function requestChanges(studentId: number, stepId: number, by: User, note: string) {
   const d = db();
   tx(() => {
-    // Course selection reopens, and new courses go back through every review (high school, units, prerequisites).
-    d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id IN (2, 4, 7, 8)').run(studentId);
+    // Course selection reopens, and new courses go back through every review (high school, young student, units, prerequisites).
+    d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id IN (2, 4, 7, 8, 9, 10)').run(studentId);
+    d.prepare('DELETE FROM young_reviews WHERE student_id = ?').run(studentId);
     d.prepare('INSERT OR REPLACE INTO step_progress (student_id, step_id, status, completed_at, data) VALUES (?,?,?,?,?)').run(
       studentId, stepId, 'changes_requested', now(), JSON.stringify({ by_id: by.id, note }));
   });
@@ -246,6 +270,7 @@ export function reopenFrom(studentId: number, stepId: number) {
   tx(() => {
     const del = d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = ?');
     for (const id of later) del.run(studentId, id);
+    if (later.includes(10)) d.prepare('DELETE FROM young_reviews WHERE student_id = ?').run(studentId);
   });
 }
 
@@ -257,9 +282,30 @@ export function studentsForParent(parentId: number): User[] {
 
 export function schoolCourses(schoolId: number): Course[] {
   return db()
-    // What a student at this school can request: their high school's Dual Enrollment sections + every Concurrent course.
-    .prepare("SELECT * FROM courses WHERE active = 1 AND ((kind = 'de' AND school_id = ?) OR kind = 'ce') ORDER BY kind DESC, code")
+    // The Dual Enrollment sections a student at this school can pick. Concurrent classes are typed in (see ceCourse).
+    .prepare("SELECT * FROM courses WHERE active = 1 AND kind = 'de' AND school_id = ? ORDER BY code")
     .all(schoolId) as Course[];
+}
+
+/** A Concurrent Enrollment class typed in by a student (or admin): code like "PSYC C1000", units, optional name. */
+export type CeEntry = { code: string; title: string; units: number; prereq: boolean };
+export const CE_DEFAULT_TITLE = 'Concurrent Enrollment';
+export function parseCe(code: unknown, title: unknown, units: unknown, prereq: unknown): CeEntry | null {
+  const c = String(code ?? '').toUpperCase().replace(/\s+/g, ' ').trim();
+  const u = Number(units);
+  if (!/^[A-Z][A-Z0-9 .\-]{1,19}$/.test(c) || !/\d/.test(c)) return null;
+  if (!Number.isFinite(u) || u < 0.5 || u > 20 || Math.round(u * 2) !== u * 2) return null;
+  const t = String(title ?? '').replace(/\s+/g, ' ').trim().slice(0, 100) || CE_DEFAULT_TITLE;
+  return { code: c, title: t, units: u, prereq: prereq === '1' || prereq === 'on' };
+}
+/** Find or create the (hidden) course row for a typed-in Concurrent class. */
+export function ceCourse(e: CeEntry): number {
+  const prereq = e.prereq ? 'Reported by the student' : null;
+  const found = db().prepare("SELECT id FROM courses WHERE kind = 'ce' AND code = ? AND title = ? AND units = ? AND prerequisite IS ?")
+    .get(e.code, e.title, e.units, prereq) as { id: number } | undefined;
+  if (found) return found.id;
+  return Number(db().prepare("INSERT INTO courses (code, title, units, schedule, prerequisite, kind, active) VALUES (?,?,?,'',?,'ce',0)")
+    .run(e.code, e.title, e.units, prereq).lastInsertRowid);
 }
 
 export function daysSince(iso: string | null): string {
@@ -334,7 +380,7 @@ export function openSchoolChange(studentId: number) {
 
 /** "Period 2 · Mr. Hall" for Dual Enrollment. Concurrent courses are just code, title and units, so nothing. */
 export function courseWhen(c: Pick<Course, 'kind' | 'period' | 'teacher'>): string {
-  if (c.kind === 'de') return [c.period ? `Period ${c.period}` : null, c.teacher].filter(Boolean).join(' · ') || 'At your high school';
+  if (c.kind === 'de') return [c.period ? `Period ${c.period}` : null, c.teacher ? (c.teacher === 'TBD' ? 'Teacher TBD' : c.teacher) : null].filter(Boolean).join(' · ') || 'At your high school';
   return '';
 }
 export const KIND_LABEL = { de: 'Dual Enrollment', ce: 'Concurrent Enrollment' } as const;
