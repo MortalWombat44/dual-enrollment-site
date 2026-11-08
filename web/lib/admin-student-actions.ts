@@ -4,6 +4,7 @@ import { requireAdmin } from './auth';
 import { db, tx } from './db';
 import { sendApproverLink } from './approver-links';
 import { notifyLeads } from './notify';
+import { clearNudges, nudgePrereq } from './nudge';
 import { addRequest, ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
@@ -49,6 +50,7 @@ export async function sendBackToStudent(formData: FormData) {
   const stepId = Number(formData.get('stepId'));
   if (![7, 8].includes(stepId) || p.steps.find((s) => s.id === stepId)?.status !== 'in_review') redirect(back(formData));
   if (!note) redirect(back(formData, { error: 'note' }));
+  if (stepId === 8) clearNudges(studentId);
   requestChanges(studentId, stepId, me, note);
   redirect(back(formData, { done: 'sent_back' }));
 }
@@ -69,6 +71,7 @@ export async function decidePrerequisites(formData: FormData) {
     const del = db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?');
     for (const d of declined) del.run(studentId, d.id, d.term_id);
   });
+  clearNudges(studentId);
   const remaining = p.courses.length - declined.length;
   if (remaining === 0) {
     // Nothing left to take: the student picks again.
@@ -123,6 +126,7 @@ export async function adminCompleteStep(formData: FormData) {
   if (stepId === 3) Object.assign(data, { method: 'office', signer: 'On file with Shasta College' });
   if (stepId === 1) data.confirmation = 'Verified by Shasta College';
   db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
+  if (stepId === 8) clearNudges(studentId);
   if (stepId === 11) {
     // Affidavit on file with Shasta College (no upload here).
     db().prepare("INSERT INTO affidavits (student_id, file_id, uploaded_by, uploaded_at, status, reviewed_by, reviewed_at, note) VALUES (?, NULL, ?, ?, 'approved', ?, ?, 'Marked complete by Shasta College')")
@@ -281,4 +285,12 @@ export async function reviewAffidavit(formData: FormData) {
   db().prepare("UPDATE affidavits SET status = ?, reviewed_by = ?, reviewed_at = ?, note = ? WHERE id = (SELECT id FROM affidavits WHERE student_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1)")
     .run(decision === 'approve' ? 'approved' : 'declined', me.id, new Date().toISOString(), note || null, studentId);
   redirect(back(formData, { done: decision === 'approve' ? 'affidavit_ok' : 'affidavit_declined' }));
+}
+
+/** Nudge college counselors to prioritize a student's prerequisite review (top of their queue, highlighted). */
+export async function nudgePrerequisite(formData: FormData) {
+  const { me, studentId, p, note } = await load(formData);
+  if (p.steps.find((s) => s.id === 8)?.status !== 'in_review') redirect(back(formData));
+  await nudgePrereq(studentId, { id: me.id, name: `${me.first_name} ${me.last_name}` }, note || null);
+  redirect(back(formData, { done: 'nudged' }));
 }

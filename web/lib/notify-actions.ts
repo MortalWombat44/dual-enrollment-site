@@ -15,6 +15,6 @@ export async function openNotification(formData: FormData) {
   const id = Number(formData.get('id'));
   const n = db().prepare('SELECT student_id, kind FROM notifications WHERE id = ? AND user_id = ?').get(id, me.id) as { student_id: number | null; kind: string } | undefined;
   db().prepare('UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?').run(new Date().toISOString(), id, me.id);
-  const tab = n?.kind === 'young' ? 'young' : n?.kind === 'homeschool' ? 'homeschool' : n?.kind === 'help' ? 'help' : 'all';
+  const tab = n?.kind === 'young' ? 'young' : n?.kind === 'homeschool' ? 'homeschool' : n?.kind === 'help' ? 'help' : n?.kind === 'nudge' ? 'prereq' : 'all';
   redirect(n?.student_id ? `/admin/students?tab=${tab}&student=${n.student_id}` : '/admin/notifications');
 }

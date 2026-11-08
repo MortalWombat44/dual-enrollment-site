@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
 import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, adminSendApproverLink, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -13,6 +13,7 @@ import { Flash } from '@/components/chrome';
 import { ArchivedRequests } from '@/components/ArchivedRequests';
 import { helpRequests, openHelpStudentIds } from '@/lib/help';
 import { resolveHelp } from '@/lib/help-actions';
+import { openNudges } from '@/lib/nudge';
 import { primarySchoolIds } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,7 @@ const DONE: Record<string, string> = {
   reopened: 'Step reopened, along with every step after it.',
   course_added: 'Class added to the request.',
   affidavit_ok: 'Private School Affidavit approved.',
+  nudged: 'Nudged. College counselors are notified, and the student is at the top of the Prerequisites queue, highlighted.',
   help_resolved: 'Help request resolved. The student sees your reply.',
   help_already: 'That help request was already resolved.',
   affidavit_declined: 'Affidavit declined. The student and parent see your note and can upload a new one.',
@@ -90,9 +92,15 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
   const isMine = (p: StudentProgress) => primary.has(p.school.id);
+  // Nudged prerequisite reviews go to the very top of the Prerequisites queue.
+  const nudges = openNudges();
+  const nudged = (p: StudentProgress) => tab === 'prereq' && nudges.has(p.student.id);
   const rows = groups[tab]
     .filter((p) => !q || `${p.student.first_name} ${p.student.last_name} ${p.student.student_number ?? ''}`.toLowerCase().includes(q))
-    .sort((a, b) => Number(isMine(b)) - Number(isMine(a)));
+    .sort((a, b) => tab === 'ids'
+      // Shared IDs: keep accounts with the same ID next to each other.
+      ? (a.student.student_number ?? '').localeCompare(b.student.student_number ?? '') || a.student.last_name.localeCompare(b.student.last_name)
+      : Number(nudged(b)) - Number(nudged(a)) || Number(isMine(b)) - Number(isMine(a)));
   const mineCount = rows.filter(isMine).length;
   const sel = (sp.student && getProgress(Number(sp.student))) || rows[0] || null;
   const waitingParent = all.filter((p) => p.steps.find((s) => s.id === 3)?.status === 'waiting_parent').length;
@@ -164,16 +172,40 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%' }}>
-              <thead><tr><th>Student</th><th>School</th><th>Courses</th><th>Step</th><th>Waiting</th></tr></thead>
+              <thead>{tab === 'ids'
+                ? <tr><th>Student</th><th>School</th><th>Email</th><th>Step</th><th>Class of</th></tr>
+                : <tr><th>Student</th><th>School</th><th>Courses</th><th>Step</th><th>Waiting</th></tr>}</thead>
               <tbody>
                 {rows.map((p, i) => {
                   const link = href({ student: p.student.id });
-                  const header = primary.size > 0 && (i === 0 || isMine(rows[i - 1]) !== isMine(p))
+                  const sid = p.student.student_number ?? '';
+                  const firstOfId = tab === 'ids' && (i === 0 || rows[i - 1].student.student_number !== sid);
+                  const lastOfId = tab === 'ids' && (i === rows.length - 1 || rows[i + 1].student.student_number !== sid);
+                  // A red bracket on the left groups accounts that share a Shasta College ID.
+                  const bracket: React.CSSProperties | undefined = tab === 'ids' ? {
+                    boxShadow: 'inset 4px 0 0 #b3261e', paddingLeft: 14,
+                    ...(firstOfId ? { backgroundImage: 'linear-gradient(#b3261e, #b3261e)', backgroundSize: '14px 3px', backgroundRepeat: 'no-repeat', backgroundPosition: 'left top' } : {}),
+                    ...(lastOfId ? { backgroundImage: `${firstOfId ? 'linear-gradient(#b3261e, #b3261e), ' : ''}linear-gradient(#b3261e, #b3261e)`, backgroundSize: firstOfId ? '14px 3px, 14px 3px' : '14px 3px', backgroundRepeat: 'no-repeat', backgroundPosition: firstOfId ? 'left top, left bottom' : 'left bottom' } : {}),
+                  } : undefined;
+                  if (tab === 'ids') {
+                    return [firstOfId ? <tr key={`g${sid}`}><td colSpan={5} className="kicker-sm" style={{ paddingTop: i === 0 ? 8 : 18, color: '#b3261e' }}>Shasta College ID {sid} · {rows.filter((x) => x.student.student_number === sid).length} accounts</td></tr> : null,
+                      <tr key={p.student.id} data-shared-id={sid} className={sel?.student.id === p.student.id ? 'sel' : undefined}>
+                        <td style={bracket}><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong></Link></td>
+                        <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
+                        <td><Link className="rowa" href={link}>{p.student.email}</Link></td>
+                        <td><Link className="rowa" href={link}>{p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done'}</Link></td>
+                        <td><Link className="rowa" href={link}>{p.student.grad_year ?? '—'}</Link></td>
+                      </tr>];
+                  }
+                  const header = primary.size > 0 && !nudged(p) && (i === 0 || isMine(rows[i - 1]) !== isMine(p) || nudged(rows[i - 1]))
                     ? <tr key={`h${i}`}><td colSpan={5} className="kicker-sm" style={{ paddingTop: i === 0 ? 8 : 20, color: isMine(p) ? 'var(--color-accent-700)' : 'var(--ink-60)' }}>{isMine(p) ? `Your schools · ${mineCount}` : `Other schools · ${rows.length - mineCount}`}</td></tr>
+                    : nudged(p) && i === 0 ? <tr key="hn"><td colSpan={5} className="kicker-sm" style={{ paddingTop: 8, color: '#b3261e' }}>Nudged · prioritize · {rows.filter(nudged).length}</td></tr>
                     : null;
                   return [header,
-                    <tr key={p.student.id} className={sel?.student.id === p.student.id ? 'sel' : undefined}>
+                    <tr key={p.student.id} data-nudged={nudged(p) ? '1' : undefined} className={sel?.student.id === p.student.id ? 'sel' : undefined}
+                      style={nudged(p) ? { background: '#fdecea', boxShadow: 'inset 4px 0 0 #b3261e' } : undefined}>
                       <td><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong>
+                        {nudged(p) && <span className="tag" style={{ marginLeft: 6, background: '#b3261e', color: '#fff' }} title={`Nudged by ${nudges.get(p.student.id)!.by_name ?? 'an admin'}`}>Nudged</span>}
                         {isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}
                         {p.student.student_number && shared.has(p.student.student_number) && <span className="tag" style={{ marginLeft: 6, background: '#fdecea', color: '#6b1a12' }}>Shared ID</span>}
                       </Link></td>
@@ -221,6 +253,15 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   const units = p.courses.reduce((n, c) => n + c.units, 0);
   const s7 = p.steps.find((s) => s.id === 7);
   const s8 = p.steps.find((s) => s.id === 8);
+  const nudge = s8?.status === 'in_review' ? openNudges().get(p.student.id) ?? null : null;
+  // Marking a step complete while prerequisite review is still open skips the college counselor's review: warn first.
+  const prereqOpen = !!s8 && s8.status !== 'complete';
+  const prereqClasses = p.courses.filter((c) => c.prerequisite).map((c) => `${c.code} (${c.term_name ?? 'no term'})`).join(', ');
+  const completeMessage = (s: { id: number; num: number; short: string }) => {
+    const base = `Mark “${s.short}” complete for ${p.student.first_name}?`;
+    if (!prereqOpen || s.num < s8!.num) return base;
+    return `⚠ Prerequisite review isn’t done.\n\n${prereqClasses || 'A requested class'} ${prereqClasses.includes(',') ? 'have' : 'has'} a prerequisite that a college counselor hasn’t reviewed yet. ${s.id === 8 ? 'Marking Prerequisite review complete approves these classes without that review.' : `Marking “${s.short}” complete moves ${p.student.first_name} past it.`}\n\nDo it anyway?`;
+  };
   const s9 = p.steps.find((s) => s.id === 9);
   const maxTerms = maxUnitTerms(p.student.id);
   const s10 = p.steps.find((s) => s.id === 10);
@@ -318,6 +359,22 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           ))}
           <div className="field"><label htmlFor="n8">Note to student (required if you decline)</label><textarea id="n8" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
           <button formAction={decidePrerequisites} className="btn btn-primary" disabled={!me.is_college_counselor} style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decisions <span>→</span></button>
+        </form>
+      )}
+
+      {s8?.status === 'in_review' && (
+        <form className="pad-sm" style={{ ...section, background: nudge ? '#fdecea' : undefined }}>
+          <Hidden p={p} keep={keep} />
+          <div className="kicker" style={{ color: '#b3261e' }}>{nudge ? 'Nudged' : 'Nudge college counselors'}</div>
+          {nudge ? (
+            <div style={{ fontSize: 14 }}>
+              Nudged by {nudge.by_name ?? 'an admin'} on {fmt(nudge.created_at)}{nudge.note ? <>: “{nudge.note}”</> : '.'} The student is at the top of the Prerequisites queue until a counselor decides.
+            </div>
+          ) : (
+            <div style={{ fontSize: 14 }}>Ask college counselors to prioritize this review. They&apos;re notified, and the student goes to the top of their Prerequisites queue, highlighted red.</div>
+          )}
+          <input name="note" className="input" maxLength={300} placeholder="Why it's urgent (optional)" aria-label="Why it's urgent" />
+          <button formAction={nudgePrerequisite} className="btn btn-secondary" style={{ alignSelf: 'flex-start', color: '#b3261e', borderColor: '#b3261e' }}>{nudge ? 'Nudge again' : 'Nudge'}</button>
         </form>
       )}
 
@@ -420,7 +477,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
                 Move back
               </ConfirmButton>
             ) : (
-              <ConfirmButton formAction={adminCompleteStep} message={`Mark “${s.short}” complete for ${p.student.first_name}?`} style={{ color: 'var(--color-accent-700)', fontSize: 13 }}>
+              <ConfirmButton formAction={adminCompleteStep} message={completeMessage(s)} style={{ color: prereqOpen && s.num >= (s8?.num ?? 99) ? '#b3261e' : 'var(--color-accent-700)', fontSize: 13 }}>
                 Mark complete
               </ConfirmButton>
             )}

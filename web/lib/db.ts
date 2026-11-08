@@ -265,6 +265,16 @@ CREATE TABLE IF NOT EXISTS help_requests (
   resolved_at TEXT,
   reply TEXT
 );
+-- "Nudges": a college admin asks college counselors to prioritize a student's prerequisite review.
+CREATE TABLE IF NOT EXISTS nudges (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  step_id INTEGER NOT NULL,
+  nudged_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  cleared_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT

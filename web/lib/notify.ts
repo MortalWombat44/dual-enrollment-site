@@ -3,7 +3,7 @@ import { db } from './db';
 import { mailConfigured, sendMail } from './mail';
 import { siteOrigin } from './approver-links';
 
-export type NoticeKind = 'young' | 'homeschool' | 'help';
+export type NoticeKind = 'young' | 'homeschool' | 'help' | 'nudge';
 const ACTIVE_ADMIN = "role = 'admin' AND disabled = 0 AND status = 'active'";
 
 /** Add an in-app notification for each admin, and email them when email is set up. */
