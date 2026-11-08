@@ -49,6 +49,7 @@ const DONE: Record<string, string> = {
   id_change_declined: 'ID change request declined.',
 };
 const ERR: Record<string, string> = {
+  ncws: 'Check “Student cleared in NCWS” before approving a prerequisite.',
   verify: 'Check Program in SACP, Start date in RGPE and Cohort in STAL before clearing.',
   no_approver: 'This student has no high school approver email on file.',
   ce: 'A concurrent class needs a course code (like PSYC C1000) and units.',
@@ -381,6 +382,10 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
               </div>
             </div>
           ))}
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, fontWeight: 700 }}>
+            <input type="checkbox" name="ncws" disabled={!me.is_college_counselor} style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+            Student cleared in NCWS <span className="ink60" style={{ fontWeight: 400 }}>(required to approve)</span>
+          </label>
           <div className="field"><label htmlFor="n8">Note to student (required if you decline)</label><textarea id="n8" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
           <button formAction={decidePrerequisites} className="btn btn-primary" disabled={!me.is_college_counselor} style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decisions <span>→</span></button>
         </form>

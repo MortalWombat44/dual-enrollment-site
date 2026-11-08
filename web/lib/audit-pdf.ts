@@ -193,9 +193,9 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
     ? `College review & clear units: ${vf ? `Shasta College ID ${vf.student_number}, Program (SACP), Start date (RGPE) and Cohort (STAL) verified in Colleague; ` : ''}units cleared by ${fullName(person(ud.admin_id))}, Shasta College, on ${when(cu.completedAt)}${ud.max_units ? ' (cleared for the maximum units for the term)' : ''}.`
     : 'College review & clear units: not yet done.');
   const pr = p.steps.find((s) => s.id === 8);
-  const pd = (pr?.data ?? {}) as { admin_id?: number; decisions?: { code: string; term?: string | null; decision: string }[] };
+  const pd = (pr?.data ?? {}) as { admin_id?: number; ncws_cleared?: boolean; decisions?: { code: string; term?: string | null; decision: string }[] };
   if (pr) {
-    w.text(pr.status === 'complete' ? `Prerequisite review: by ${fullName(person(pd.admin_id))} on ${when(pr.completedAt)}.` : 'Prerequisite review: not yet reviewed.');
+    w.text(pr.status === 'complete' ? `Prerequisite review: by ${fullName(person(pd.admin_id))} on ${when(pr.completedAt)}${pd.ncws_cleared ? '; student cleared in NCWS' : ''}.` : 'Prerequisite review: not yet reviewed.');
     for (const d of pd.decisions ?? []) w.text(`${d.code}${d.term ? ` (${d.term})` : ''}: ${d.decision}`, { size: 9, x: M + 14 });
   }
 

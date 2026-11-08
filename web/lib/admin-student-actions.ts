@@ -77,6 +77,9 @@ export async function decidePrerequisites(formData: FormData) {
   const decisions = prereq.map((c) => ({ id: c.id, term_id: c.term_id, code: c.code, term: c.term_name, decision: formData.get(field(c)) === 'decline' ? 'declined' : 'approved' }));
   const declined = decisions.filter((d) => d.decision === 'declined');
   if (declined.length && !note) redirect(back(formData, { error: 'note' }));
+  // Approving needs the student cleared in NCWS first (declining doesn't).
+  const ncws = formData.get('ncws') === 'on';
+  if (decisions.some((d) => d.decision === 'approved') && !ncws) redirect(back(formData, { error: 'ncws' }));
   const at = new Date().toISOString();
   tx(() => {
     const ok = db().prepare("UPDATE course_requests SET prereq_status = 'approved', prereq_by = ?, prereq_at = ? WHERE student_id = ? AND course_id = ? AND term_id IS ?");
@@ -91,7 +94,7 @@ export async function decidePrerequisites(formData: FormData) {
     requestChanges(studentId, 8, me, note);
     redirect(back(formData, { done: 'sent_back' }));
   }
-  completeStep(studentId, 8, { admin_id: me.id, note, decisions }, true);
+  completeStep(studentId, 8, { admin_id: me.id, note, decisions, ncws_cleared: ncws }, true);
   redirect(back(formData, { done: 'prereq' }));
 }
 
