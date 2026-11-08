@@ -145,7 +145,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
       </div>
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 420px', flex: 1 }}>
         <div className="pad-sm noborder-sm" style={{ padding: '24px 32px 40px', borderRight: '2px solid var(--color-text)', minWidth: 0 }}>
-          <div className="seg" style={{ marginBottom: 14 }}>
+          <div className="seg seg-wrap" style={{ marginBottom: 14 }}>
             {(groups.help.length > 0 || tab === 'help') && (
               <Link className="seg-opt" href={href({ tab: 'help' })} aria-current={tab === 'help'}>Help · {groups.help.length}</Link>
             )}

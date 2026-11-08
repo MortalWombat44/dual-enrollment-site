@@ -377,3 +377,7 @@ a.seg-opt[aria-current='true'] { background: var(--color-text); color: var(--col
   .full-sm { width: 100% !important; min-width: 0 !important; }
 }
 @media print { .no-print { display: none !important; } body { background: #fff; } }
+
+/* Admin queue tabs: wrap onto a second row instead of spilling over the student panel. */
+.seg-wrap { display: flex; flex-wrap: wrap; max-width: 100%; }
+.seg-wrap .seg-opt { white-space: nowrap; flex: 0 0 auto; }
