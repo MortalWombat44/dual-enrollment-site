@@ -2,7 +2,7 @@ import 'server-only';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import { db } from './db';
 import { getFile, readFile } from './files';
-import { classLabel, fmt, getProgress, type StudentProgress, type Term } from './workflow';
+import { archivedRequests, classLabel, fmt, getProgress, getTerm, type StudentProgress, type Term } from './workflow';
 import { unitLimit } from './constants';
 
 const W = 612, H = 792, M = 54; // US Letter, 0.75" margins
@@ -131,6 +131,14 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
     w.text(`Total: ${units} units (usual limit ${limit})${units > limit ? ' · OVER THE USUAL LIMIT' : ''}`, { size: 9, gap: 8 });
   }
 
+  // Archived requests (registration for the term was turned off before the student registered).
+  const pickedNames = new Set(termIds.map((id) => getTerm(id)?.name));
+  const archived = archivedRequests(p.student.id).filter((r) => !termIds.length || pickedNames.has(r.term_name ?? undefined));
+  if (archived.length) {
+    w.text('Archived requests (not in the workflow):', { bold: true, size: 10, gap: 4 });
+    for (const r of archived) w.text(`${r.code} · ${r.title} · ${r.units} units · ${r.term_name ?? 'no term'}. Archived ${fmt(r.archived_at, 'mdy')}: ${r.archived_reason ?? ''}`, { size: 9, x: M + 14 });
+  }
+
   // 3 · Approvals
   w.heading('Approvals');
   const hs = p.steps.find((s) => s.id === 4);
@@ -175,10 +183,10 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
   const ud = (cu?.data ?? {}) as { admin_id?: number; note?: string; max_units?: boolean };
   if (cu) w.text(cu.status === 'complete' ? `Clear units: cleared by ${fullName(person(ud.admin_id))}, Shasta College, on ${when(cu.completedAt)}${ud.max_units ? ' (cleared for the maximum units for the term)' : ''}.` : 'Clear units: not yet cleared.');
   const pr = p.steps.find((s) => s.id === 8);
-  const pd = (pr?.data ?? {}) as { admin_id?: number; decisions?: { code: string; decision: string }[] };
+  const pd = (pr?.data ?? {}) as { admin_id?: number; decisions?: { code: string; term?: string | null; decision: string }[] };
   if (pr) {
     w.text(pr.status === 'complete' ? `Prerequisite review: by ${fullName(person(pd.admin_id))} on ${when(pr.completedAt)}.` : 'Prerequisite review: not yet reviewed.');
-    for (const d of pd.decisions ?? []) w.text(`${d.code}: ${d.decision}`, { size: 9, x: M + 14 });
+    for (const d of pd.decisions ?? []) w.text(`${d.code}${d.term ? ` (${d.term})` : ''}: ${d.decision}`, { size: 9, x: M + 14 });
   }
 
   // Uploaded consent form, appended as-is.

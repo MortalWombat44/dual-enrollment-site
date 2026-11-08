@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
 import { db, tx } from './db';
-import { ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
+import { addRequest, ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
 function back(formData: FormData, extra: Record<string, string> = {}) {
@@ -56,14 +56,16 @@ export async function decidePrerequisites(formData: FormData) {
   const { me, studentId, p, note } = await load(formData);
   if (!me.is_college_counselor) redirect(back(formData, { error: 'not_counselor' }));
   if (p.steps.find((s) => s.id === 8)?.status !== 'in_review') redirect(back(formData));
+  // One decision per class per term (the same class can be requested in two terms).
   const prereq = p.courses.filter((c) => c.prerequisite);
-  const decisions = prereq.map((c) => ({ id: c.id, code: c.code, decision: formData.get(`course_${c.id}`) === 'decline' ? 'declined' : 'approved' }));
-  if (prereq.some((c) => !formData.get(`course_${c.id}`))) redirect(back(formData, { error: 'decide' }));
+  const field = (c: { id: number; term_id: number | null }) => `course_${c.id}_${c.term_id ?? 0}`;
+  if (prereq.some((c) => !['approve', 'decline'].includes(String(formData.get(field(c)) || '')))) redirect(back(formData, { error: 'decide' }));
+  const decisions = prereq.map((c) => ({ id: c.id, term_id: c.term_id, code: c.code, term: c.term_name, decision: formData.get(field(c)) === 'decline' ? 'declined' : 'approved' }));
   const declined = decisions.filter((d) => d.decision === 'declined');
   if (declined.length && !note) redirect(back(formData, { error: 'note' }));
   tx(() => {
-    const del = db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ?');
-    for (const d of declined) del.run(studentId, d.id);
+    const del = db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?');
+    for (const d of declined) del.run(studentId, d.id, d.term_id);
   });
   const remaining = p.courses.length - declined.length;
   if (remaining === 0) {
@@ -118,6 +120,11 @@ export async function adminCompleteStep(formData: FormData) {
   if (stepId === 3) Object.assign(data, { method: 'office', signer: 'On file with Shasta College' });
   if (stepId === 1) data.confirmation = 'Verified by Shasta College';
   db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
+  if (stepId === 5) {
+    // Register is per term: mark every term of the student's classes as registered (by this admin).
+    const ins = db().prepare('INSERT OR IGNORE INTO registrations (student_id, term_id, registered_at, marked_by) VALUES (?,?,?,?)');
+    for (const t of p.requestTerms) ins.run(studentId, t.id, new Date().toISOString(), me.id);
+  }
   if (stepId === 4) {
     // High school approval is per class: the override marks every pending class approved by Shasta College (no HS signature).
     db().prepare(`UPDATE course_requests SET hs_status = 'approved', hs_by = ?, hs_at = ?, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = 'admin'
@@ -129,9 +136,14 @@ export async function adminCompleteStep(formData: FormData) {
 
 /** Override · move a step backward (reopen it and every step after it). */
 export async function adminReopenStep(formData: FormData) {
-  const { studentId } = await load(formData);
+  const { studentId, p } = await load(formData);
   const stepId = Number(formData.get('stepId'));
   if (!STUDENT_STEP_IDS.includes(stepId)) redirect(back(formData));
+  if (stepId === 4) {
+    // High school approval lives on each class and can't be undone here: say which classes were already approved.
+    const approved = p.courses.filter((c) => c.hs_status === 'approved').map((c) => `${c.code} (${c.term_name ?? 'no term'})`);
+    redirect(back(formData, { done: 'hs_already', classes: approved.join(', ') }));
+  }
   reopenFrom(studentId, stepId);
   redirect(back(formData, { done: 'reopened' }));
 }
@@ -150,7 +162,7 @@ export async function adminAddCourse(formData: FormData) {
     courseId = Number(formData.get('courseId'));
     if (!db().prepare("SELECT 1 FROM courses WHERE id = ? AND active = 1 AND kind = 'de' AND school_id = ?").get(courseId, p.school.id)) redirect(back(formData));
   }
-  db().prepare('INSERT OR IGNORE INTO course_requests (student_id, course_id, term_id) VALUES (?,?,?)').run(studentId, courseId, termId);
+  addRequest(studentId, courseId, termId);
   redirect(back(formData, { done: 'course_added' }));
 }
 

@@ -17,10 +17,10 @@ export function schoolRoster(schoolId: number, termId?: number): RosterClass[] {
   const d = db();
   const de = d.prepare("SELECT * FROM courses WHERE kind = 'de' AND school_id = ? AND active = 1 ORDER BY code").all(schoolId) as Course[];
   const reqs = d.prepare(`
-    SELECT r.course_id, r.student_id, t.name AS term
+    SELECT r.course_id, r.student_id, t.name AS term, r.archived_at
     FROM course_requests r JOIN users u ON u.id = r.student_id LEFT JOIN terms t ON t.id = r.term_id
     WHERE u.role = 'student' AND u.school_id = ? AND u.disabled = 0 ${termId ? 'AND r.term_id = ?' : ''}`)
-    .all(...(termId ? [schoolId, termId] : [schoolId])) as { course_id: number; student_id: number; term: string | null }[];
+    .all(...(termId ? [schoolId, termId] : [schoolId])) as { course_id: number; student_id: number; term: string | null; archived_at: string | null }[];
   const ids = [...new Set(reqs.map((r) => r.course_id))];
   const requested = ids.length ? (d.prepare(`SELECT * FROM courses WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as Course[]) : [];
   const classes = new Map<number, RosterClass>();
@@ -37,7 +37,8 @@ export function schoolRoster(schoolId: number, termId?: number): RosterClass[] {
       gradYear: p.student.grad_year,
       young: isYoung(p.student),
       term: r.term,
-      step: p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done',
+      // Archived: registration for the term was turned off before they registered. Kept so staff can see why.
+      step: r.archived_at ? 'Archived · registration turned off' : p.next ? `${pad(p.next.num)} ${p.next.short}` : 'Done',
       stepStatus: p.next?.status ?? 'complete',
     });
   }

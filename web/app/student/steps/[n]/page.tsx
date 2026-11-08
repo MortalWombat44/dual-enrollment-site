@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireRole } from '@/lib/auth';
-import { activeTerms, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
+import { activeTerms, archivedRequests, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
-import { addStudentId, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { addMoreClasses, addStudentId, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
 import { StudentIdForm } from '@/components/StudentIdForm';
 import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
@@ -22,10 +22,10 @@ const ERRORS: Record<string, string> = {
   ce: 'Each concurrent class needs a course code (like PSYC C1000) and units (for example 3 or 4).',
 };
 
-export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string }> }) {
+export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string }> }) {
   const me = await requireRole('student');
   const { n } = await params;
-  const { error, invited, invite_error } = await searchParams;
+  const { error, invited, invite_error, added } = await searchParams;
   const p = getProgress(me.id);
   const s = p?.steps.find((x) => x.id === Number(n));
   if (!p || !s) notFound();
@@ -35,7 +35,7 @@ export default async function StepPage({ params, searchParams }: { params: Promi
     <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: '100vh', maxWidth: 1280, margin: '0 auto', boxShadow: '0 1px 3px rgba(0,0,0,.08)' }}>
       <Sidebar p={p} current={s.id} />
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {s.status === 'complete' ? <CompleteView p={p} s={s} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} />}
+        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} />}
         <div className="pad-sm" style={{ marginTop: 'auto', borderTop: '2px solid var(--color-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 48px', gap: 12, flexWrap: 'wrap' }}>
           {s.id === 3 && s.status === 'complete' ? (
             <a href={`/consent/${p.student.id}`} className="btn btn-ghost" style={{ color: 'var(--color-accent-700)' }}>View signed consent</a>
@@ -117,7 +117,7 @@ function Cells({ cells }: { cells: [string, string, string][] }) {
   );
 }
 
-function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
+function CompleteView({ p, s, error, added }: { p: StudentProgress; s: StudentStep; error?: string; added?: string }) {
   const copy = completionCopy(p, s);
   const units = p.courses.reduce((n, c) => n + c.units, 0);
   const d = s.data ?? {};
@@ -153,12 +153,7 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
         </div>
       )}
       <Cells cells={cells} />
-      {s.id === 2 && (
-        <form action={reopenCourseSelection} className="pad-sm" style={{ padding: '24px 48px 0', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary">Add or change classes</button>
-          <span className="ink60" style={{ fontSize: 13 }}>Classes that are already approved stay approved. New classes go through the reviews again.</span>
-        </form>
-      )}
+      {s.id === 2 && <MoreClasses p={p} error={error} added={added} />}
       <div className="pad-sm" style={{ padding: '32px 48px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <h4 style={{ margin: 0, fontSize: 15 }}>Included in your packet</h4>
         <PacketTable p={p} />
@@ -167,9 +162,57 @@ function CompleteView({ p, s }: { p: StudentProgress; s: StudentStep }) {
   );
 }
 
+/** Requests closed because registration for their term was turned off (shown while that term stays closed). */
+function ArchivedNotice({ studentId }: { studentId: number }) {
+  const openNames = new Set(activeTerms().map((t) => t.name));
+  const archived = archivedRequests(studentId).filter((r) => !openNames.has(r.term_name ?? ''));
+  if (!archived.length) return null;
+  return (
+    <div style={{ fontSize: 14, borderLeft: '4px solid #d08a00', background: '#fff4e0', color: '#8a4b00', padding: '10px 14px' }}>
+      Registration was turned off for {[...new Set(archived.map((r) => r.term_name))].join(' and ')}, so {archived.length === 1 ? 'this request was' : 'these requests were'} closed: {archived.map((r) => r.code).join(', ')}. You can request classes in an open term.
+    </div>
+  );
+}
+
+/** After the first course selection: request more classes any time (even while others are in review), or change them. */
+function MoreClasses({ p, error, added }: { p: StudentProgress; error?: string; added?: string }) {
+  const terms = activeTerms();
+  const base: Record<number, number> = {};
+  for (const c of p.courses) if (c.term_id) base[c.term_id] = (base[c.term_id] ?? 0) + c.units;
+  return (
+    <div id="more" className="pad-sm" style={{ padding: '28px 48px 0', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 820 }}>
+      {added && <div className="flash" role="status">{Number(added) === 0 ? 'Those classes were already on your request.' : `Requested ${added} more class${added === '1' ? '' : 'es'}. ${p.school.designation === 'CCAP' ? 'Shasta College reviews them next.' : 'Your high school reviews them next.'}`}</div>}
+      {error && <div className="flash flash-err">{error}</div>}
+      <ArchivedNotice studentId={p.student.id} />
+      <h3 style={{ margin: 0, fontSize: 20 }}>Request more classes</h3>
+      <div className="ink60" style={{ fontSize: 14 }}>You can add classes any time, even while others are being reviewed. Classes you already requested stay as they are.</div>
+      <form action={addMoreClasses} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <CoursePicker
+          courses={schoolCourses(p.school.id)}
+          initial={[]}
+          initialCe={[]}
+          baseUnits={base}
+          terms={terms.map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy'), limit: unitLimit(p.school.designation, t.summer === 1) }))}
+          ccap={p.school.designation === 'CCAP'}
+          schoolName={p.school.name}
+        />
+        <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Request these classes <span>→</span></button></div>
+      </form>
+      <form action={reopenCourseSelection} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', borderTop: '2px solid var(--color-divider)', paddingTop: 16 }}>
+        <button className="btn btn-secondary">Change or remove classes</button>
+        <span className="ink60" style={{ fontSize: 13 }}>Classes that are already approved stay approved. New or moved classes go through the reviews again.</span>
+      </form>
+    </div>
+  );
+}
+
 function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string }) {
   const tag = stepTag(s)!;
   const counselor = 'Your high school'; // no staff names for students
+  // Course selection only changes classes in terms that are open for registration; the rest are kept as they are.
+  const openTermIds = new Set(activeTerms().map((t) => t.id));
+  const openCourses = p.courses.filter((c) => c.term_id && openTermIds.has(c.term_id));
+  const closedKept = p.courses.filter((c) => !c.term_id || !openTermIds.has(c.term_id));
   const prevReq = [...p.steps].reverse().find((x) => x.num < s.num && x.mode === 'required' && x.status !== 'complete');
   const live = s.status !== 'locked' && s.status !== 'scheduled';
   const body =
@@ -210,10 +253,17 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
                 <div style={{ fontSize: 15, marginTop: 4 }}>“{p.changeNote}”</div>
               </div>
             )}
+            <ArchivedNotice studentId={p.student.id} />
+            {closedKept.length > 0 && (
+              <div style={{ fontSize: 14, borderLeft: '4px solid var(--color-divider)', paddingLeft: 12 }}>
+                <div style={{ fontWeight: 700 }}>Kept as they are</div>
+                {closedKept.map((c) => <div key={`${c.id}-${c.term_id}`}>{c.code} · {c.term_name} <span className="ink60">(registration for this term is closed, so it can't be changed here)</span></div>)}
+              </div>
+            )}
             <CoursePicker
               courses={schoolCourses(p.school.id)}
-              initial={p.courses.filter((c) => c.kind === 'de').map((c) => ({ id: c.id, term_id: c.term_id }))}
-              initialCe={p.courses.filter((c) => c.kind === 'ce').map((c) => ({ code: c.code, title: c.title === CE_DEFAULT_TITLE ? '' : c.title, units: String(c.units), term: c.term_id ?? 0, prereq: !!c.prerequisite }))}
+              initial={openCourses.filter((c) => c.kind === 'de').map((c) => ({ id: c.id, term_id: c.term_id }))}
+              initialCe={openCourses.filter((c) => c.kind === 'ce').map((c) => ({ code: c.code, title: c.title === CE_DEFAULT_TITLE ? '' : c.title, units: String(c.units), term: c.term_id ?? 0, prereq: !!c.prerequisite }))}
               terms={activeTerms().map((t) => ({ id: t.id, name: t.name, opens: fmt(t.registration_opens, 'mdy'), limit: unitLimit(p.school.designation, t.summer === 1) }))}
               ccap={p.school.designation === 'CCAP'}
               schoolName={p.school.name}
@@ -241,11 +291,17 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
             <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} />
           </div>
         )}
+        {s.id === 5 && p.registeredTermIds.length > 0 && s.status !== 'complete' && (
+          <div style={{ fontSize: 14, color: 'var(--color-accent-700)', fontWeight: 700 }}>
+            ✓ Registered for {p.requestTerms.filter((t) => p.registeredTermIds.includes(t.id)).map((t) => t.name).join(', ')}
+          </div>
+        )}
         {s.id === 5 && s.status === 'current' && (
           <form action={confirmRegistered} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <p style={{ margin: 0, fontSize: 15 }}>Register yourself in myShasta for your approved sections: <strong>{p.courses.map((c) => c.code).join(', ')}</strong>. Once you're registered, confirm it here.</p>
+            <input type="hidden" name="termId" value={p.term.id} />
+            <p style={{ margin: 0, fontSize: 15 }}>Register yourself in myShasta for your approved {p.term.name} sections: <strong>{p.courses.filter((c) => c.term_id === p.term.id).map((c) => c.code).join(', ')}</strong>. Once you're registered, confirm it here.</p>
             <div className="field" style={{ maxWidth: 360 }}><label htmlFor="crns">Section numbers (CRNs), optional</label><input id="crns" name="crns" className="input" placeholder="e.g. 40211, 40388" /></div>
-            <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>I'm registered <span>→</span></button></div>
+            <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>I'm registered for {p.term.name} <span>→</span></button></div>
           </form>
         )}
         {s.id === 5 && s.status === 'scheduled' && (

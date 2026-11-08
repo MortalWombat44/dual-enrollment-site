@@ -25,6 +25,8 @@ export type Course = {
   id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null;
   /** 'ce' Concurrent Enrollment (at Shasta College) or 'de' Dual Enrollment (at the high school, with period + teacher). */
   kind: 'ce' | 'de'; school_id: number | null; period: string | null; teacher: string | null; active: number;
+  /** Dual Enrollment: the only term this section is offered (null = every term). */
+  offered_term_id: number | null;
 };
 /** A requested class, with the term the student asked to take it in. */
 export type RequestedCourse = Course & {
@@ -62,6 +64,8 @@ export type StudentProgress = {
   done: boolean;
   next: StudentStep | null;
   courses: RequestedCourse[];
+  /** Terms the student confirmed registering for (Register for classes is per term). */
+  registeredTermIds: number[];
   /** Terms the student's classes are in (registration date and whether registration is allowed). */
   requestTerms: Term[];
   /** "Spring 2027" or "Spring 2027 + Summer 2027": what the student is enrolling for. */
@@ -163,14 +167,21 @@ export function getProgress(studentId: number): StudentProgress | null {
   const courses = d
     .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method
               FROM course_requests r JOIN courses c ON c.id = r.course_id
-              LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? ORDER BY t.registration_opens, c.code`)
+              LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? AND r.archived_at IS NULL ORDER BY t.registration_opens, c.code`)
     .all(studentId) as RequestedCourse[];
   // Classes carry their own term. The Register step follows the earliest registration date among them;
   // with no classes yet, the student's default term.
   const requestTerms = [...new Set(courses.map((c) => c.term_id).filter((x): x is number => !!x))]
     .map(getTerm).filter((t): t is Term => !!t)
     .sort((a, b) => a.registration_opens.localeCompare(b.registration_opens));
-  const term = requestTerms[0] ?? homeTerm;
+  // Register for classes is per term: done when the student registered for every term they have classes in.
+  const regs = new Map((d.prepare('SELECT term_id, crns, registered_at FROM registrations WHERE student_id = ?').all(studentId) as
+    { term_id: number; crns: string | null; registered_at: string }[]).map((r) => [r.term_id, r]));
+  const unregistered = requestTerms.filter((t) => !regs.has(t.id));
+  const registeredAll = requestTerms.length > 0 && unregistered.length === 0;
+  const lastReg = registeredAll ? requestTerms.map((t) => regs.get(t.id)!).sort((a, b) => a.registered_at.localeCompare(b.registered_at)).at(-1)! : null;
+  // "The" term for registration dates: the next one still to register for.
+  const term = unregistered[0] ?? requestTerms[0] ?? homeTerm;
   const termLabel = requestTerms.length ? requestTerms.map((t) => t.name).join(' + ') : homeTerm.name;
   // Prerequisite review only applies when a requested class has a prerequisite (or it already ran).
   const needsPrereq = courses.some((c) => c.prerequisite) || (prog.has(8) && prog.get(8)!.status === 'complete');
@@ -193,7 +204,7 @@ export function getProgress(studentId: number): StudentProgress | null {
     // so adding classes later (e.g. next term) opens it again for just those classes.
     const hsDone = courses.length > 0 && courses.every((c) => c.hs_status === 'approved');
     const autoCleared = def.id === 7 && p?.status !== 'complete' && unitsByMax;
-    const isComplete = def.id === 4 ? hsDone : p?.status === 'complete' || autoCleared;
+    const isComplete = def.id === 4 ? hsDone : def.id === 5 ? registeredAll : p?.status === 'complete' || autoCleared;
     const maxAt = autoCleared ? courses.map((c) => maxCleared.get(c.term_id!)!.cleared_at).sort().at(-1)! : null;
     const hsAt = def.id === 4 && hsDone ? courses.map((c) => c.hs_at ?? '').sort().at(-1) || p?.completed_at || null : null;
     let status: StepStatus;
@@ -207,9 +218,9 @@ export function getProgress(studentId: number): StudentProgress | null {
     if (!isComplete && mode === 'required') blocked = true;
     steps.push({
       id: def.id, num: steps.length + 1, name: def.name, short: def.short, description: def.description,
-      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : autoCleared ? maxAt : p!.completed_at) : null,
-      data: autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
-      seen: !isComplete || !p || p.seen === 1,
+      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : def.id === 5 ? lastReg!.registered_at : autoCleared ? maxAt : p!.completed_at) : null,
+      data: def.id === 5 ? (isComplete ? { crns: lastReg!.crns } : null) : autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
+      seen: !isComplete || !p || p.seen === 1 || def.id === 5,
     });
   }
   const complete = steps.filter((s) => s.status === 'complete').length;
@@ -220,7 +231,7 @@ export function getProgress(studentId: number): StudentProgress | null {
     .all(studentId) as User[];
   return {
     student, school, term, counselor: getUser(student.counselor_id), parents, steps, complete, total: steps.length,
-    done, next, courses, requestTerms, termLabel, startedAt: enr?.started_at ?? null,
+    done, next, courses, requestTerms, termLabel, registeredTermIds: [...regs.keys()], startedAt: enr?.started_at ?? null,
     changeNote: changeRow?.data ? (JSON.parse(changeRow.data).note as string) ?? null : null,
     changeBy: changeRow ? (changeRow.step_id === 4 ? 'counselor' : 'college') : null,
   };
@@ -237,6 +248,49 @@ export function youngRecommendation(studentId: number): YoungRec | null {
 export function maxUnitTerms(studentId: number): string[] {
   return (db().prepare('SELECT t.name FROM unit_clearances c JOIN terms t ON t.id = c.term_id WHERE c.student_id = ? ORDER BY t.registration_opens')
     .all(studentId) as { name: string }[]).map((r) => r.name);
+}
+
+/**
+ * Add a class request. If the same class + term was archived earlier (registration was turned off), it comes back
+ * as a new, pending request.
+ */
+export function addRequest(studentId: number, courseId: number, termId: number) {
+  db().prepare(`INSERT INTO course_requests (student_id, course_id, term_id) VALUES (?,?,?)
+    ON CONFLICT (student_id, course_id, term_id) DO UPDATE SET archived_at = NULL, archived_reason = NULL,
+      hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL
+    WHERE archived_at IS NOT NULL`).run(studentId, courseId, termId);
+}
+
+/** Requests archived because registration for their term was turned off before the student registered. Staff only. */
+export function archivedRequests(studentId: number): { code: string; title: string; units: number; term_name: string | null; archived_at: string; archived_reason: string | null }[] {
+  return db().prepare(`SELECT c.code, c.title, c.units, t.name AS term_name, r.archived_at, r.archived_reason
+    FROM course_requests r JOIN courses c ON c.id = r.course_id LEFT JOIN terms t ON t.id = r.term_id
+    WHERE r.student_id = ? AND r.archived_at IS NOT NULL ORDER BY r.archived_at DESC, c.code`).all(studentId) as never;
+}
+
+/** Turning registration off for a term archives the requests of students who hadn't registered for it yet. */
+export function archiveClosedTerm(termId: number) {
+  const t = getTerm(termId);
+  if (!t) return 0;
+  const d = db();
+  const at = now();
+  const affected = (d.prepare(`SELECT DISTINCT student_id FROM course_requests r WHERE term_id = ? AND archived_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM registrations g WHERE g.student_id = r.student_id AND g.term_id = r.term_id)`).all(termId) as { student_id: number }[]).map((r) => r.student_id);
+  const n = tx(() => {
+    const changes = Number(d.prepare(`UPDATE course_requests SET archived_at = ?, archived_reason = ?
+      WHERE term_id = ? AND archived_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM registrations g WHERE g.student_id = course_requests.student_id AND g.term_id = course_requests.term_id)`)
+      .run(at, `Registration for ${t.name} was turned off before the student registered.`, termId).changes);
+    // Students left with no active classes go back to Course selection (nothing is left to review).
+    for (const id of affected) {
+      if (d.prepare('SELECT 1 FROM course_requests WHERE student_id = ? AND archived_at IS NULL').get(id)) continue;
+      d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id IN (2, 4, 7, 8, 9, 10)').run(id);
+      d.prepare('DELETE FROM young_reviews WHERE student_id = ?').run(id);
+    }
+    return changes;
+  });
+  sweepYoungDocs();
+  return n;
 }
 
 export function completeStep(studentId: number, stepId: number, data: Record<string, unknown> | null, bySomeoneElse = false) {
@@ -286,6 +340,7 @@ export function reopenFrom(studentId: number, stepId: number) {
     if (later.includes(10)) d.prepare('DELETE FROM young_reviews WHERE student_id = ?').run(studentId);
     // Moving Clear units back on purpose also drops any "cleared for maximum units" so it really reopens.
     if (later.includes(7)) d.prepare('DELETE FROM unit_clearances WHERE student_id = ?').run(studentId);
+    if (later.includes(5)) d.prepare('DELETE FROM registrations WHERE student_id = ?').run(studentId);
   });
   if (later.includes(9)) sweepYoungDocs();
 }

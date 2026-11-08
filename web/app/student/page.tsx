@@ -81,7 +81,10 @@ export default async function StudentDashboard({ searchParams }: { searchParams:
           )}
         </div>
       </div>
-      <div className="pad-sm" style={{ margin: '32px 40px 40px' }}>
+      <div className="pad-sm" style={{ margin: '32px 40px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {p.steps.find((x) => x.id === 2)?.status === 'complete' && (
+          <a href="/student/steps/2#more" className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>+ Request more classes</a>
+        )}
         <StepGrid p={p} hrefBase="/student/steps" />
       </div>
     </div>

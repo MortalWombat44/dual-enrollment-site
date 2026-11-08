@@ -13,18 +13,18 @@ const ERR: Record<string, string> = {
   exists: 'A term with that name already exists.',
 };
 
-export default async function TermsPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
+export default async function TermsPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string; archived?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
   const terms = allTerms();
   // Students with at least one class requested in the term.
-  const counts = new Map((db().prepare('SELECT term_id, COUNT(DISTINCT student_id) AS n FROM course_requests WHERE term_id IS NOT NULL GROUP BY term_id').all() as { term_id: number; n: number }[]).map((r) => [r.term_id, r.n]));
+  const counts = new Map((db().prepare('SELECT term_id, COUNT(DISTINCT student_id) AS n FROM course_requests WHERE term_id IS NOT NULL AND archived_at IS NULL GROUP BY term_id').all() as { term_id: number; n: number }[]).map((r) => [r.term_id, r.n]));
   const saved = sp.saved ? getTerm(Number(sp.saved)) : null;
 
   return (
     <AdminShell me={me} current="terms">
       <AdminHead title="Terms" />
-      <Flash msg={saved ? `Saved ${saved.name}. Registration opens ${fmt(saved.registration_opens, 'wmd')} at ${fmt(saved.registration_opens, 'time')} Pacific.` : null} />
+      <Flash msg={saved ? `Saved ${saved.name}. Registration opens ${fmt(saved.registration_opens, 'wmd')} at ${fmt(saved.registration_opens, 'time')} Pacific.${sp.archived ? ` Registration is off, so ${sp.archived} class request${sp.archived === '1' ? '' : 's'} from students who hadn't registered yet ${sp.archived === '1' ? 'was' : 'were'} archived (staff can still see them on each student).` : ''}` : null} />
       <Flash error msg={sp.error ? ERR[sp.error] : null} />
       <div className="pad-sm" style={{ padding: '24px 40px 8px', fontSize: 14 }}>
         Several terms can take registrations at once. Students choose a term for each class they request, from the terms with registration allowed. Turning registration off stops new requests for that term and flags any existing ones to the student and to the admin clearing units. Usual unit limits: CCAP students 15 per term; non-CCAP students 11, or 7 in a summer term. Students can go over; they and the admin clearing units see a note.

@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS courses (
   school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
   period TEXT,
   teacher TEXT,
-  active INTEGER NOT NULL DEFAULT 1 -- removed courses stay on existing requests
+  active INTEGER NOT NULL DEFAULT 1, -- removed courses stay on existing requests
+  offered_term_id INTEGER REFERENCES terms(id) ON DELETE SET NULL -- Dual Enrollment: the one term it's offered (NULL = every term)
 );
 CREATE TABLE IF NOT EXISTS school_courses (
   school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
@@ -115,6 +116,9 @@ CREATE TABLE IF NOT EXISTS course_requests (
   hs_signed_name TEXT,
   hs_signature_file_id INTEGER,
   hs_sign_method TEXT,
+  -- Set when registration for the term was turned off before the student registered: kept for staff, out of the workflow.
+  archived_at TEXT,
+  archived_reason TEXT,
   PRIMARY KEY (student_id, course_id, term_id)
 );
 CREATE TABLE IF NOT EXISTS files (
@@ -186,6 +190,15 @@ CREATE TABLE IF NOT EXISTS unit_clearances (
   cleared_at TEXT NOT NULL,
   PRIMARY KEY (student_id, term_id)
 );
+-- "Register for classes" is per term: one row per term the student confirmed registering for.
+CREATE TABLE IF NOT EXISTS registrations (
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+  crns TEXT,
+  registered_at TEXT NOT NULL,
+  marked_by INTEGER REFERENCES users(id), -- an admin marked it, instead of the student
+  PRIMARY KEY (student_id, term_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -250,6 +263,7 @@ export function db(): Db {
     // Class requests made before classes had terms get the student's term.
     conn.exec('UPDATE course_requests SET term_id = (SELECT term_id FROM enrollments e WHERE e.student_id = course_requests.student_id) WHERE term_id IS NULL');
     if (count.n === 0) approveFromStepFour(conn);
+    backfillRegistrations(conn);
     _db = conn;
   }
   const conn = _db;
@@ -456,6 +470,16 @@ function seed(d: DatabaseSync) {
  * Named accounts that must exist on every database, including a freshly reset one.
  * Created only if missing, so a changed password is never overwritten.
  */
+/** Register used to be one step for everything: students who finished it are registered for the terms of their classes. */
+function backfillRegistrations(d: DatabaseSync) {
+  if (d.prepare("SELECT 1 FROM settings WHERE key = 'registrations_backfilled'").get()) return;
+  d.exec(`INSERT OR IGNORE INTO registrations (student_id, term_id, crns, registered_at)
+    SELECT DISTINCT p.student_id, r.term_id, json_extract(p.data, '$.crns'), p.completed_at
+    FROM step_progress p JOIN course_requests r ON r.student_id = p.student_id
+    WHERE p.step_id = 5 AND p.status = 'complete' AND r.term_id IS NOT NULL`);
+  d.exec("INSERT INTO settings (key, value) VALUES ('registrations_backfilled', '1')");
+}
+
 /** Tabitha Miller's account was seeded with a password in the code; it's been removed. Deletes it where it still exists. */
 function removeRetiredSeedAccounts(d: DatabaseSync) {
   const u = d.prepare("SELECT id FROM users WHERE email = 'tmiller@shastacollege.edu'").get() as { id: number } | undefined;
@@ -560,6 +584,13 @@ function migrate(d: DatabaseSync) {
       ALTER TABLE course_requests_new RENAME TO course_requests;
     `);
     approveFromStepFour(d);
+  }
+  const courseCols2 = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
+  if (!courseCols2.includes('offered_term_id')) d.exec('ALTER TABLE courses ADD COLUMN offered_term_id INTEGER REFERENCES terms(id) ON DELETE SET NULL');
+  const reqCols2 = (d.prepare('PRAGMA table_info(course_requests)').all() as { name: string }[]).map((c) => c.name);
+  if (!reqCols2.includes('archived_at')) {
+    d.exec('ALTER TABLE course_requests ADD COLUMN archived_at TEXT');
+    d.exec('ALTER TABLE course_requests ADD COLUMN archived_reason TEXT');
   }
   const courseCols = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
   if (!courseCols.includes('prerequisite')) d.exec('ALTER TABLE courses ADD COLUMN prerequisite TEXT');

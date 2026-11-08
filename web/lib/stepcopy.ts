@@ -86,7 +86,7 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
     case 9: return 'Students in 8th grade and below send a recent report card or transcript and a letter from their principal.';
     case 10: return `A Shasta College counselor reviews your documents for ${list}, then Shasta College makes the final decision.`;
     case 4: return `Your high school is reviewing ${list}. Check with your high school counselor if you have questions.`;
-    case 5: return s.status === 'scheduled' ? `Registration opens ${fmt(p.term.registration_opens)} at ${fmt(p.term.registration_opens, 'time')}.` : 'Register for your approved sections in myShasta.';
+    case 5: return s.status === 'scheduled' ? `Registration for ${p.term.name} opens ${fmt(p.term.registration_opens)} at ${fmt(p.term.registration_opens, 'time')}.` : `Register for your approved ${p.term.name} sections in myShasta.`;
     default: return 'Get your textbooks and log in to Canvas before the first day.';
   }
 }

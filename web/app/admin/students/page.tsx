@@ -9,12 +9,13 @@ import {
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
 import { Flash } from '@/components/chrome';
+import { ArchivedRequests } from '@/components/ArchivedRequests';
 import { primarySchoolIds } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
 type Tab = 'units' | 'prereq' | 'young' | 'school' | 'idreq' | 'ids' | 'all';
-type SP = { tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
+type SP = { classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const DONE: Record<string, string> = {
   cleared: 'Units cleared. The student moves to the next step.',
@@ -118,7 +119,9 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
           <button className="btn btn-secondary">Filter</button>
         </form>
       </div>
-      <Flash msg={sp.done ? DONE[sp.done] : null} />
+      <Flash msg={sp.done === 'hs_already'
+        ? `These requests were already approved by the high school${sp.classes ? `: ${sp.classes}` : ''}. Approvals stay with each class, so High school approval can't be moved back. To change a class, remove it or move it to another term; the new request goes back to the high school.`
+        : sp.done ? DONE[sp.done] : null} />
       <Flash error msg={sp.error ? ERR[sp.error] : null} />
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label={primary.size ? `Clear units · ${groups.units.filter(isMine).length} at your schools` : 'Clear units · waiting on you'} value={String(groups.units.length)} hero />
@@ -280,12 +283,12 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <div className="kicker accent700">Prerequisite review</div>
           {!me.is_college_counselor && <div style={{ fontSize: 13 }}>Only admins designated as college counselors can approve or decline these.</div>}
           {p.courses.filter((c) => c.prerequisite).map((c) => (
-            <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--color-divider)' }}>
+            <div key={`${c.id}-${c.term_id}`} data-prereq={`${c.code} ${c.term_name ?? ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--color-divider)' }}>
               <div style={{ fontSize: 14 }}><strong>{c.code}</strong> · {c.title} <span className="ink60">· {c.term_name ?? 'No term'}</span></div>
               <div className="ink60" style={{ fontSize: 13 }}>Prerequisite: {c.prerequisite}</div>
-              <div className="seg seg-modes" role="radiogroup" aria-label={`${c.code} decision`} style={{ alignSelf: 'flex-start' }}>
-                <label className="seg-opt" data-v="required"><input type="radio" name={`course_${c.id}`} value="approve" disabled={!me.is_college_counselor} />Approve</label>
-                <label className="seg-opt" data-v="off"><input type="radio" name={`course_${c.id}`} value="decline" disabled={!me.is_college_counselor} />Decline</label>
+              <div className="seg seg-modes" role="radiogroup" aria-label={`${c.code} ${c.term_name ?? ''} decision`} style={{ alignSelf: 'flex-start' }}>
+                <label className="seg-opt" data-v="required"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="approve" disabled={!me.is_college_counselor} />Approve</label>
+                <label className="seg-opt" data-v="off"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="decline" disabled={!me.is_college_counselor} />Decline</label>
               </div>
             </div>
           ))}
@@ -338,6 +341,8 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           )}
         </form>
       )}
+
+      <ArchivedRequests studentId={p.student.id} style={{ ...section, background: '#fdf6ec' }} />
 
       <div className="pad-sm" style={section}>
         <div className="kicker">Steps · move forward or back</div>

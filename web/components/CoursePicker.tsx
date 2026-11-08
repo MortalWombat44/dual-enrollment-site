@@ -4,6 +4,7 @@ import { useState } from 'react';
 type Course = {
   id: number; code: string; title: string; units: number; schedule: string; prerequisite: string | null;
   kind: 'ce' | 'de'; period: string | null; teacher: string | null;
+  offered_term_id?: number | null; // only offered in this term (null = every term)
 };
 type Term = { id: number; name: string; opens: string; limit: number };
 /** A typed-in Concurrent Enrollment class. Units stay a string while typing. */
@@ -19,8 +20,10 @@ const when = (c: Course) => c.kind === 'de'
  * and Concurrent Enrollment (taught at Shasta College). Each picked class gets a term; only terms with
  * registration allowed are offered. Unit limits are per term and only show a note when exceeded.
  */
-export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolName }: {
+export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolName, baseUnits = {} }: {
   courses: Course[];
+  /** Units already requested per term (when adding more classes), counted in the term totals. */
+  baseUnits?: Record<number, number>;
   initial: { id: number; term_id: number | null }[];
   initialCe: CeRow[];
   terms: Term[];
@@ -35,11 +38,20 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
   const [ce, setCe] = useState<CeRow[]>(initialCe.length ? initialCe.map((r) => ({ ...r, term: allowed.has(r.term) ? r.term : terms[0]?.id ?? 0 })) : []);
   const setRow = (i: number, patch: Partial<CeRow>) => setCe((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   // Term totals count Dual and Concurrent classes together.
-  const unitsIn = (termId: number) =>
+  const unitsIn = (termId: number) => (baseUnits[termId] ?? 0) +
     courses.filter((c) => sel.get(c.id) === termId).reduce((n, c) => n + c.units, 0)
     + ce.filter((r) => r.term === termId).reduce((n, r) => n + (Number(r.units) > 0 ? Number(r.units) : 0), 0);
-  const toggle = (id: number) => setSel((s) => { const n = new Map(s); if (n.has(id)) n.delete(id); else n.set(id, terms[0]?.id ?? 0); return n; });
+  const termsFor = (c: Course) => (c.offered_term_id ? terms.filter((t) => t.id === c.offered_term_id) : terms);
+  const toggle = (id: number) => setSel((s) => {
+    const n = new Map(s);
+    const c = courses.find((x) => x.id === id);
+    if (n.has(id)) n.delete(id); else n.set(id, (c && termsFor(c)[0]?.id) ?? terms[0]?.id ?? 0);
+    return n;
+  });
   const setTerm = (id: number, termId: number) => setSel((s) => new Map(s).set(id, termId));
+
+  // Sections offered in one term only show while that term is open.
+  const listed = courses.filter((c) => termsFor(c).length > 0);
 
   if (terms.length === 0) {
     return <div className="flash flash-err" style={{ padding: '12px 16px' }}>Registration isn't open for any term right now. Check back soon, or contact Shasta College Outreach.</div>;
@@ -55,11 +67,11 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
         />
         <label htmlFor={`c${c.id}`} style={{ cursor: 'pointer' }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{c.code} · {c.title}</div>
-          <div className="ink60" style={{ fontSize: 13 }}>{c.units} units{when(c) ? ` · ${when(c)}` : ''}{c.prerequisite ? ` · Prerequisite: ${c.prerequisite} (a college counselor reviews this)` : ''}</div>
+          <div className="ink60" style={{ fontSize: 13 }}>{c.units} units{when(c) ? ` · ${when(c)}` : ''}{c.offered_term_id ? ` · ${termsFor(c)[0]?.name} only` : ''}{c.prerequisite ? ` · Prerequisite: ${c.prerequisite} (a college counselor reviews this)` : ''}</div>
         </label>
         {on ? (
           <select name={`term_${c.id}`} className="input" aria-label={`Term for ${c.code} (${c.kind === 'de' ? 'Dual' : 'Concurrent'})`} value={sel.get(c.id)} onChange={(e) => setTerm(c.id, Number(e.target.value))} style={{ width: 150, marginRight: 8 }}>
-            {terms.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {termsFor(c).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         ) : <span />}
       </div>
@@ -81,8 +93,8 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
           <span style={{ fontWeight: 800, fontSize: 17 }}>Dual Enrollment</span>
           <span className="ink60" style={{ fontSize: 13 }}>Taught at {schoolName}</span>
         </div>
-        {courses.length === 0 && <div className="ink60" style={{ fontSize: 14, padding: '10px 0' }}>No Dual Enrollment classes are listed for your school yet.</div>}
-        {courses.map(row)}
+        {listed.length === 0 && <div className="ink60" style={{ fontSize: 14, padding: '10px 0' }}>No Dual Enrollment classes are listed for your school yet.</div>}
+        {listed.map(row)}
       </div>
       <div data-kind="ce" style={{ display: 'flex', flexDirection: 'column', marginTop: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', paddingBottom: 6, borderBottom: '2px solid var(--color-text)' }}>

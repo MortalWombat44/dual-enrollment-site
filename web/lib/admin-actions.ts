@@ -4,7 +4,7 @@ import { requireAdmin } from './auth';
 import { clearFailures, createResetToken } from './security';
 import { dismissRetireNudge, retireClass, retirableClasses } from './retire';
 import { cryptoToken, db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
-import { currentTerm, fromPacificInput } from './workflow';
+import { archiveClosedTerm, currentTerm, fromPacificInput } from './workflow';
 
 const ROLES = ['student', 'counselor', 'admin'] as const; // parents are invited by their student
 const MODES = ['required', 'optional', 'off'] as const;
@@ -106,8 +106,11 @@ export async function saveTerm(formData: FormData) {
   // Keep at least one active term so new students always have somewhere to go.
   if (!active && !db().prepare('SELECT 1 FROM terms WHERE is_current = 1 AND id != ?').get(id)) redirect(`/admin/terms?error=last&term=${id}`);
   const summer = formData.get('summer') === 'on' ? 1 : 0;
+  const was = db().prepare('SELECT is_current FROM terms WHERE id = ?').get(id) as { is_current: number } | undefined;
   db().prepare('UPDATE terms SET name = ?, registration_opens = ?, is_current = ?, summer = ? WHERE id = ?').run(name, iso, active, summer, id);
-  redirect(`/admin/terms?saved=${id}`);
+  // Turning registration off archives requests from students who hadn't registered for this term yet.
+  const archived = was?.is_current === 1 && !active ? archiveClosedTerm(id) : 0;
+  redirect(`/admin/terms?saved=${id}${archived ? `&archived=${archived}` : ''}`);
 }
 
 export async function addTerm(formData: FormData) {
@@ -177,6 +180,8 @@ function courseFields(formData: FormData) {
     period: str('period', 20) || null,
     teacher: str('teacher', 80) || null,
     prerequisite: str('prerequisite', 200) || null,
+    // Dual Enrollment: offered in one term only (blank = every term).
+    offeredTerm: Number(formData.get('offered_term_id')) && db().prepare('SELECT 1 FROM terms WHERE id = ?').get(Number(formData.get('offered_term_id'))) ? Number(formData.get('offered_term_id')) : null,
   };
 }
 
@@ -192,8 +197,8 @@ export async function addCourse(formData: FormData) {
   const kind = schoolId ? 'de' : 'ce';
   if (!f.code || !f.title || Number.isNaN(f.units)) redirect(courseReturn(formData, 'course_error=1'));
   if (schoolId && !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) redirect('/admin/schools');
-  db().prepare('INSERT INTO courses (code, title, units, schedule, prerequisite, kind, school_id, period, teacher) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(f.code, f.title, f.units, '', f.prerequisite, kind, schoolId, kind === 'de' ? f.period : null, kind === 'de' ? f.teacher : null);
+  db().prepare('INSERT INTO courses (code, title, units, schedule, prerequisite, kind, school_id, period, teacher, offered_term_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(f.code, f.title, f.units, '', f.prerequisite, kind, schoolId, kind === 'de' ? f.period : null, kind === 'de' ? f.teacher : null, kind === 'de' ? f.offeredTerm : null);
   redirect(courseReturn(formData, 'course_saved=1'));
 }
 
@@ -205,7 +210,7 @@ export async function saveCourse(formData: FormData) {
   const f = courseFields(formData);
   if (!f.code || !f.title || Number.isNaN(f.units)) redirect(courseReturn(formData, 'course_error=1'));
   if (c!.kind === 'de') {
-    db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, period = ?, teacher = ?, prerequisite = ? WHERE id = ?').run(f.code, f.title, f.units, f.period, f.teacher, f.prerequisite, id);
+    db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, period = ?, teacher = ?, prerequisite = ?, offered_term_id = ? WHERE id = ?').run(f.code, f.title, f.units, f.period, f.teacher, f.prerequisite, f.offeredTerm, id);
   } else {
     db().prepare('UPDATE courses SET code = ?, title = ?, units = ?, prerequisite = ? WHERE id = ?').run(f.code, f.title, f.units, f.prerequisite, id);
   }

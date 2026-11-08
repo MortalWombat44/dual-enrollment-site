@@ -6,6 +6,7 @@ import { approve, requestIdChange, staffSetGrade } from '@/lib/counselor-actions
 import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
 import { ApproveSignForm } from '@/components/ApproveSignForm';
+import { ArchivedRequests } from '@/components/ArchivedRequests';
 import type { User } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -144,6 +145,7 @@ function ReviewPanel({ p, me }: { p: StudentProgress | null; me: User }) {
       ) : s4?.status === 'complete' && s4.data?.note ? (
         <div className="pad-sm" style={{ padding: '20px 32px', fontSize: 14 }}>Your note: “{String(s4.data.note)}”</div>
       ) : null}
+      <ArchivedRequests studentId={p.student.id} style={{ padding: '20px 32px', borderTop: '2px solid var(--color-divider)' }} />
       <StudentRecord p={p} />
     </div>
   );
