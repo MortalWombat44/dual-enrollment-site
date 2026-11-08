@@ -2,6 +2,8 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
 import { db, tx } from './db';
+import { sendApproverLink } from './approver-links';
+import { notifyLeads } from './notify';
 import { addRequest, ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
@@ -88,6 +90,7 @@ export async function recommendYoung(formData: FormData) {
   const data: YoungRec = { rec_by: me.id, rec: rec as YoungRec['rec'], rec_note: note, rec_at: new Date().toISOString() };
   db().prepare('INSERT OR REPLACE INTO young_reviews (student_id, rec_by, rec, rec_note, rec_at) VALUES (?,?,?,?,?)')
     .run(studentId, data.rec_by, data.rec, data.rec_note, data.rec_at);
+  await notifyLeads('young', studentId, `${p.student.first_name} ${p.student.last_name} (young student): ${rec === 'recommend' ? 'recommended' : 'not recommended'} by ${me.first_name} ${me.last_name}. A Young Student Approver makes the final decision.`);
   redirect(back(formData, { done: 'young_rec' }));
 }
 
@@ -120,6 +123,11 @@ export async function adminCompleteStep(formData: FormData) {
   if (stepId === 3) Object.assign(data, { method: 'office', signer: 'On file with Shasta College' });
   if (stepId === 1) data.confirmation = 'Verified by Shasta College';
   db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(studentId);
+  if (stepId === 11) {
+    // Affidavit on file with Shasta College (no upload here).
+    db().prepare("INSERT INTO affidavits (student_id, file_id, uploaded_by, uploaded_at, status, reviewed_by, reviewed_at, note) VALUES (?, NULL, ?, ?, 'approved', ?, ?, 'Marked complete by Shasta College')")
+      .run(studentId, me.id, new Date().toISOString(), me.id, new Date().toISOString());
+  }
   if (stepId === 5) {
     // Register is per term: mark every term of the student's classes as registered (by this admin).
     const ins = db().prepare('INSERT OR IGNORE INTO registrations (student_id, term_id, registered_at, marked_by) VALUES (?,?,?,?)');
@@ -191,9 +199,15 @@ export async function declineSchoolChange(formData: FormData) {
 }
 async function decideSchoolChange(formData: FormData, approve: boolean) {
   const { me, studentId } = await load(formData);
-  const req = db().prepare("SELECT id, to_school_id FROM school_change_requests WHERE student_id = ? AND status = 'open'").get(studentId) as { id: number; to_school_id: number } | undefined;
+  const req = db().prepare("SELECT id, to_school_id, approver_name, approver_email FROM school_change_requests WHERE student_id = ? AND status = 'open'").get(studentId) as
+    { id: number; to_school_id: number; approver_name: string | null; approver_email: string | null } | undefined;
   if (!req) redirect(back(formData));
-  if (approve) moveStudentSchool(studentId, req.to_school_id);
+  if (approve) {
+    const cur = db().prepare('SELECT school_id FROM users WHERE id = ?').get(studentId) as { school_id: number | null } | undefined;
+    if (req!.to_school_id !== cur?.school_id) moveStudentSchool(studentId, req!.to_school_id);
+    // An unlisted ("Other") school comes with the approver the student named.
+    db().prepare('UPDATE users SET hs_approver_name = ?, hs_approver_email = ? WHERE id = ?').run(req!.approver_name, req!.approver_email, studentId);
+  }
   db().prepare('UPDATE school_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req.id);
   redirect(back(formData, { done: approve ? 'school_change_approved' : 'school_change_declined' }));
 }
@@ -247,4 +261,24 @@ async function decideIdChange(formData: FormData, approve: boolean) {
     db().prepare('UPDATE id_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req!.id);
   });
   redirect(back(formData, { done: approve ? 'id_change_approved' : 'id_change_declined' }));
+}
+
+/** Unlisted-school students: make (and email, if set up) a new approval link for the approver they named. */
+export async function adminSendApproverLink(formData: FormData) {
+  const { studentId } = await load(formData);
+  const r = await sendApproverLink(studentId);
+  if (!r) redirect(back(formData, { error: 'no_approver' }));
+  redirect(back(formData, { done: 'approver_link', link: r!.link, emailed: r!.emailed ? '1' : '0' }));
+}
+
+/** Homeschooled students: a college admin approves or declines the Private School Affidavit. */
+export async function reviewAffidavit(formData: FormData) {
+  const { me, studentId, p, note } = await load(formData);
+  if (p.steps.find((s) => s.id === 11)?.status !== 'in_review') redirect(back(formData));
+  const decision = formData.get('decision');
+  if (decision !== 'approve' && decision !== 'decline') redirect(back(formData, { error: 'decide' }));
+  if (decision === 'decline' && !note) redirect(back(formData, { error: 'note' }));
+  db().prepare("UPDATE affidavits SET status = ?, reviewed_by = ?, reviewed_at = ?, note = ? WHERE id = (SELECT id FROM affidavits WHERE student_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1)")
+    .run(decision === 'approve' ? 'approved' : 'declined', me.id, new Date().toISOString(), note || null, studentId);
+  redirect(back(formData, { done: decision === 'approve' ? 'affidavit_ok' : 'affidavit_declined' }));
 }

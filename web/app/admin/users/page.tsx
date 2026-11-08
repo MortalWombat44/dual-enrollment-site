@@ -25,7 +25,7 @@ const ERRORS: Record<string, string> = {
 
 const STAFF_LABEL: Record<string, string> = { counselor: 'Counselor', admin: 'Admin', teacher: 'Teacher', other: 'Other' };
 
-type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; is_young_approver: number; staff_type: string | null; disabled: number; retired_at: string | null };
+type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; is_young_approver: number; is_young_lead: number; is_homeschool_lead: number; staff_type: string | null; disabled: number; retired_at: string | null };
 
 export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string; resetfor?: string; token?: string; unlocked?: string; retired?: string; rs?: string; rp?: string }> }) {
   const me = await requireAdmin('super');
@@ -37,7 +37,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   if (role) { where.push('u.role = ?'); args.push(role); }
   if (q) { where.push("(u.first_name || ' ' || u.last_name LIKE ? OR u.email LIKE ?)"); args.push(`%${q}%`, `%${q}%`); }
   const rows = db().prepare(
-    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.is_young_approver, u.staff_type, u.disabled, u.retired_at, s.name AS school
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.status, u.invite_token, u.admin_level, u.is_college_counselor, u.is_young_approver, u.is_young_lead, u.is_homeschool_lead, u.staff_type, u.disabled, u.retired_at, s.name AS school
      FROM users u LEFT JOIN schools s ON s.id = u.school_id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY u.created_at DESC, u.id DESC LIMIT 200`).all(...args) as Row[];
@@ -100,7 +100,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                   {u.role === 'admin' ? (
                     <details>
                       <summary style={{ cursor: 'pointer' }}>
-                        {u.admin_level === 'super' ? 'Super admin' : 'College admin'}{u.is_college_counselor ? ' · College counselor' : ''}{u.is_young_approver ? ' · Young Student Approver' : ''}
+                        {u.admin_level === 'super' ? 'Super admin' : 'College admin'}{u.is_college_counselor ? ' · College counselor' : ''}{u.is_young_approver ? ' · Young Student Approver' : ''}{u.is_young_lead ? ' · Young student lead' : ''}{u.is_homeschool_lead ? ' · Homeschool lead' : ''}
                         {(primaryOf.get(u.id) ?? []).length > 0 && (
                           <div className="ink60" style={{ fontSize: 12 }}>Primary: {schools.filter((x) => primaryOf.get(u.id)!.includes(x.id)).map((x) => short(x.name)).join(', ')}</div>
                         )}
@@ -116,6 +116,12 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                         </label>
                         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
                           <input type="checkbox" name="young_approver" defaultChecked={!!u.is_young_approver} style={{ accentColor: 'var(--color-accent)' }} /> Young Student Approver
+                        </label>
+                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                          <input type="checkbox" name="young_lead" defaultChecked={!!u.is_young_lead} style={{ accentColor: 'var(--color-accent)' }} /> Young student lead (notified)
+                        </label>
+                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                          <input type="checkbox" name="homeschool_lead" defaultChecked={!!u.is_homeschool_lead} style={{ accentColor: 'var(--color-accent)' }} /> Homeschool lead (notified)
                         </label>
                         <fieldset style={{ border: '1px solid var(--color-divider)', padding: '6px 10px', margin: 0 }}>
                           <legend style={{ fontSize: 12, padding: '0 4px' }}>Primary schools (shown first in their to-do)</legend>

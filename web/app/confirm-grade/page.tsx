@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/auth';
 import { confirmGrade } from '@/lib/student-actions';
 import { currentClassYear, currentGrade, GRADES, needsGradeConfirm, ordinal } from '@/lib/workflow';
 import { TopBar } from '@/components/chrome';
+import { ProfileFields } from '@/components/ProfileFields';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export default async function ConfirmGrade({ searchParams }: { searchParams: Pro
           <h1 className="h-sm" style={{ fontSize: 44, lineHeight: 1.05, margin: '10px 0 0', letterSpacing: '-0.02em' }}>Welcome back, {me.first_name}.</h1>
           <p style={{ fontSize: 16, margin: '12px 0 0' }}>Before you continue, confirm your grade this school year and when you'll graduate from high school.</p>
         </div>
-        {sp.error && <div className="flash flash-err" style={{ padding: '12px 16px' }}>Pick your grade and graduation year.</div>}
+        {sp.error && <div className="flash flash-err" style={{ padding: '12px 16px' }}>{sp.error === 'plans' ? 'Tell us whether you plan to attend Shasta College after high school.' : 'Pick your grade and graduation year.'}</div>}
         <form action={confirmGrade} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="field">
             <label htmlFor="grade">Grade you're in this school year</label>
@@ -38,6 +39,7 @@ export default async function ConfirmGrade({ searchParams }: { searchParams: Pro
               {years.map((y) => <option key={y} value={y}>Class of {y}</option>)}
             </select>
           </div>
+          <ProfileFields ask={['plans']} gradeSelectId="grade" values={{ plans: me.plans_year === thisClass ? me.plans_shasta : null }} />
           <div style={{ borderTop: '2px solid var(--color-text)', paddingTop: 20 }}>
             <button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>Confirm and continue <span>→</span></button>
           </div>

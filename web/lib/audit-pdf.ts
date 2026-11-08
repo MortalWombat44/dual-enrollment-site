@@ -2,7 +2,7 @@ import 'server-only';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import { db } from './db';
 import { getFile, readFile } from './files';
-import { archivedRequests, classLabel, fmt, getProgress, getTerm, type StudentProgress, type Term } from './workflow';
+import { archivedRequests, classLabel, isAdult, fmt, getProgress, getTerm, type StudentProgress, type Term } from './workflow';
 import { unitLimit } from './constants';
 
 const W = 612, H = 792, M = 54; // US Letter, 0.75" margins
@@ -100,7 +100,7 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
   const consent = p.steps.find((s) => s.id === 3);
   const cd = (consent?.data ?? {}) as { method?: string; signer?: string; file_id?: number; parent_id?: number; admin_id?: number };
   let uploaded: ReturnType<typeof getFile> = null;
-  if (!consent) w.text('Parent consent is turned off for this school.');
+  if (!consent) w.text(isAdult(p.student) ? `Not required: the student is 18 or older (born ${p.student.date_of_birth}).` : 'Parent consent is turned off for this school.');
   else if (consent.status !== 'complete') w.text('No parent consent on file.', { bold: true });
   else {
     w.text(`Signed by: ${cd.signer ?? '—'}${cd.parent_id ? ` (parent / guardian account: ${fullName(person(cd.parent_id))})` : ''}`);
@@ -150,7 +150,7 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
     if (!list.length) w.text('No classes in the selected term(s).', { size: 9, x: M + 14 });
     const batches = new Map<string, typeof list>();
     for (const c of list) {
-      const k = c.hs_status === 'approved' ? `${c.hs_by}|${c.hs_at}|${c.hs_signature_file_id}|${c.hs_sign_method}` : 'pending';
+      const k = c.hs_status === 'approved' ? `${c.hs_by}|${c.hs_signer_email}|${c.hs_at}|${c.hs_signature_file_id}|${c.hs_sign_method}` : 'pending';
       batches.set(k, [...(batches.get(k) ?? []), c]);
     }
     for (const [k, cs] of batches) {
@@ -161,13 +161,20 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
         w.text(`${names}: marked approved by Shasta College admin ${fullName(person(c.hs_by))} on ${when(c.hs_at)} (no high school signature).`, { x: M + 14 });
         continue;
       }
-      w.text(`${names}: approved and digitally signed by ${c.hs_signed_name ?? fullName(person(c.hs_by))}, High School Staff, ${p.school.name}, on ${when(c.hs_at)}.`, { x: M + 14 });
+      const role = c.hs_signer_email ? `high school approver named by the student (${c.hs_signer_email}, approved by emailed link)` : 'High School Staff';
+      w.text(`${names}: approved and digitally signed by ${c.hs_signed_name ?? fullName(person(c.hs_by))}, ${role}, ${p.school.name}, on ${when(c.hs_at)}.`, { x: M + 14 });
       const img = await embedStoredPng(doc, c.hs_signature_file_id ?? undefined);
       if (img) {
         w.image(img, 260, 70);
         w.text(`Signature (${c.hs_sign_method ?? 'drawn'})`, { size: 8, color: MUTED, gap: 6 });
       } else w.text('No signature image on file.', { size: 9, color: MUTED, x: M + 14 });
     }
+  }
+  const af = p.steps.find((s) => s.id === 11);
+  if (af) {
+    const a = (af.data ?? {}) as { status?: string; reviewed_by?: number; reviewed_at?: string; uploaded_at?: string };
+    w.text(af.status === 'complete' ? `Private School Affidavit (homeschool): approved by ${fullName(person(a.reviewed_by))}, Shasta College, on ${when(a.reviewed_at)}.`
+      : af.status === 'in_review' ? `Private School Affidavit (homeschool): uploaded ${when(a.uploaded_at)}, not yet reviewed.` : 'Private School Affidavit (homeschool): not on file.');
   }
   const yr = p.steps.find((s) => s.id === 10);
   if (yr) {

@@ -24,8 +24,10 @@ export type PendingClass = { id: number; term_id: number | null; code: string; t
  * High school approval, one decision per class per term, then "Approve & sign digitally" once for the batch.
  * Staff use their saved signature, draw one, or type their name (shown in cursive). Declining needs a note.
  */
-export function ApproveSignForm({ studentId, staffName, savedUrl, pending, approve }: {
+export function ApproveSignForm({ studentId, staffName, savedUrl, pending, approve, hidden = {} }: {
   studentId: number;
+  /** Extra hidden fields (e.g. the approver link token for an outside approver). */
+  hidden?: Record<string, string>;
   staffName: string;
   savedUrl: string | null;
   pending: PendingClass[];
@@ -52,6 +54,7 @@ export function ApproveSignForm({ studentId, staffName, savedUrl, pending, appro
   return (
     <form style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       <input type="hidden" name="studentId" value={studentId} />
+      {Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
       <input type="hidden" name="sign_mode" value={mode} />
       <input type="hidden" name="signature" value={signature} />
       <input type="hidden" name="signed_name" value={mode === 'type' ? typed.trim() : staffName} />

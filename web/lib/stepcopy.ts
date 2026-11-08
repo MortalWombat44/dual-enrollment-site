@@ -12,6 +12,7 @@ export function stepSub(p: StudentProgress, s: StudentStep): string {
       if (s.id === 3) return `Signed ${fmt(s.completedAt)}`;
       if (s.id === 4 || s.id === 8 || s.id === 10) return `Approved ${fmt(s.completedAt)}`;
       if (s.id === 9) return `Sent ${fmt(s.completedAt)}`;
+      if (s.id === 11) return `Approved ${fmt(s.completedAt)}`;
       if (s.id === 7) return `Cleared ${fmt(s.completedAt)}`;
       return fmt(s.completedAt);
     case 'in_review':
@@ -58,6 +59,7 @@ export function dashboardLine(p: StudentProgress): string {
       if (n.id === 7) return 'Your high school approved your plan. Shasta College is checking your units now.';
       if (n.id === 8) return 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.';
       if (n.id === 10) return 'Shasta College is reviewing your report card and principal letter.';
+      if (n.id === 11) return 'Shasta College is reviewing your Private School Affidavit.';
       return `Your high school is reviewing your classes now. Check with your high school counselor if you have questions.`;
     case 'waiting_parent': return p.parents.length ? 'Your parent or guardian needs to sign the consent form before you can pick courses.' : 'Invite your parent or guardian to sign the consent form. You can pick courses once they do.';
     case 'changes': return `${p.changeBy === 'college' ? 'Shasta College' : 'Your high school'} asked for a change to your courses. Update them and resubmit.`;
@@ -83,6 +85,7 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
         : `${displayName(p.parents[0])} hasn't accepted your invite yet.`;
     case 7: return `Shasta College is checking that ${list} fit your unit limit. Usually 1–2 days.`;
     case 8: return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.prerequisite).map((c) => c.code).join(', ') || 'your classes'}.`;
+    case 11: return s.status === 'in_review' ? 'Shasta College is reviewing your Private School Affidavit.' : 'Upload the Private School Affidavit (you or your parent). Shasta College reviews it.';
     case 9: return 'Students in 8th grade and below send a recent report card or transcript and a letter from their principal.';
     case 10: return `A Shasta College counselor reviews your documents for ${list}, then Shasta College makes the final decision.`;
     case 4: return `Your high school is reviewing ${list}. Check with your high school counselor if you have questions.`;
@@ -103,7 +106,7 @@ export function completionCopy(p: StudentProgress, s: StudentStep): { title: str
   const then = (id: number) => {
     const n = after(id)?.id;
     return n === 4 ? 'Your high school reviews them next.' : n === 9 ? 'Next, send your report card and principal letter.'
-      : n === 10 ? 'Shasta College reviews your documents next.' : n === 7 ? 'Shasta College clears your units next.'
+      : n === 10 ? 'Shasta College reviews your documents next.' : n === 11 ? 'Next, upload your Private School Affidavit.' : n === 7 ? 'Shasta College clears your units next.'
       : n === 8 ? 'A college counselor checks prerequisites next.' : reg;
   };
   switch (s.id) {
@@ -113,6 +116,7 @@ export function completionCopy(p: StudentProgress, s: StudentStep): { title: str
     case 7: return { title: 'Your units\nare cleared.', poster: 'Shasta College cleared your units.', body: `Shasta College cleared ${list}. ${then(7)}` };
     case 8: return { title: 'Prerequisites\nare approved.', poster: 'Your prerequisites are approved.', body: `A college counselor approved ${list}. ${reg}` };
     case 4: return { title: `You're approved,\n${p.student.first_name}.`, poster: 'Your high school approved your courses.', body: `Your high school approved ${list}. ${then(4)}` };
+    case 11: return { title: 'Your affidavit\nis approved.', poster: 'Your Private School Affidavit is approved.', body: `Shasta College approved your Private School Affidavit. ${then(11)}` };
     case 9: return { title: 'Your documents\nare in.', poster: 'Your documents are in.', body: `Thanks. ${then(9)}` };
     case 10: return { title: `You're approved,\n${p.student.first_name}.`, poster: 'Shasta College approved your request.', body: `Shasta College approved ${list}. ${then(10)}` };
     case 5: return { title: `You're registered,\n${p.student.first_name}.`, poster: "You're registered for classes.", body: `You're enrolled in ${list} for ${p.termLabel}.` };

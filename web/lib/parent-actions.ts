@@ -4,6 +4,9 @@ import { requireRole } from './auth';
 import { isParentOf } from './access';
 import { saveFile, sniff } from './files';
 import { completeStep, getProgress } from './workflow';
+import { saveAffidavit } from './affidavit';
+import { notifyLeads } from './notify';
+import { db } from './db';
 
 export async function submitConsent(formData: FormData) {
   const me = await requireRole('parent');
@@ -27,4 +30,17 @@ export async function submitConsent(formData: FormData) {
   const fileId = saveFile({ studentId, uploadedBy: me.id, kind: 'signature', filename: 'signature.png', mime: 'image/png', data: buf });
   completeStep(studentId, 3, { method, signer, parent_id: me.id, file_id: fileId }, true);
   redirect(`/parent?signed=${studentId}`);
+}
+
+/** A parent uploads their homeschooled student's Private School Affidavit. */
+export async function parentSubmitAffidavit(formData: FormData) {
+  const me = await requireRole('parent');
+  const studentId = Number(formData.get('studentId'));
+  if (!isParentOf(me, studentId)) redirect('/parent');
+  if (getProgress(studentId)?.steps.find((s) => s.id === 11)?.status !== 'current') redirect(`/parent?student=${studentId}`);
+  const err = await saveAffidavit(studentId, me.id, formData.get('affidavit'));
+  if (err) redirect(`/parent/affidavit?student=${studentId}&error=${err}`);
+  const kid = db().prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(studentId) as { first_name: string; last_name: string };
+  await notifyLeads('homeschool', studentId, `${kid.first_name} ${kid.last_name}'s parent uploaded a Private School Affidavit to review.`);
+  redirect(`/parent?student=${studentId}&affidavit=1`);
 }

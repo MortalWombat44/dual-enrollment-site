@@ -17,6 +17,8 @@ export type School = {
   name: string;
   district: string;
   designation: 'CCAP' | 'NON_CCAP';
+  /** 'listed' (on the sign-up list), 'other' (typed in by a student), 'homeschool' (the one Homeschool entry). */
+  kind: 'listed' | 'other' | 'homeschool';
   agreement_id: string | null;
   agreement_expires: string | null;
 };
@@ -33,10 +35,16 @@ export type RequestedCourse = Course & {
   term_id: number | null; term_name: string | null;
   /** High school approval for this class in this term (Non-CCAP schools). */
   hs_status: 'pending' | 'approved'; hs_by: number | null; hs_at: string | null;
-  hs_signed_name: string | null; hs_signature_file_id: number | null; hs_sign_method: string | null;
+  hs_signed_name: string | null; hs_signature_file_id: number | null; hs_sign_method: string | null; hs_signer_email: string | null;
 };
 
 /** CCAP schools never use high school approval; Non-CCAP schools always do (per class, per term). */
+export type Affidavit = { id: number; file_id: number | null; uploaded_by: number | null; uploaded_at: string; status: 'pending' | 'approved' | 'declined'; reviewed_by: number | null; reviewed_at: string | null; note: string | null };
+/** The student's most recent Private School Affidavit upload (homeschooled students). */
+export function latestAffidavit(studentId: number): Affidavit | null {
+  return (db().prepare('SELECT id, file_id, uploaded_by, uploaded_at, status, reviewed_by, reviewed_at, note FROM affidavits WHERE student_id = ? ORDER BY id DESC LIMIT 1').get(studentId) as Affidavit | undefined) ?? null;
+}
+
 export const hsApprovalMode = (designation: 'CCAP' | 'NON_CCAP'): Mode => (designation === 'CCAP' ? 'off' : 'required');
 
 export type StudentStep = {
@@ -157,6 +165,9 @@ export function getProgress(studentId: number): StudentProgress | null {
   const modes: Record<number, Mode> = enr?.step_modes ? JSON.parse(enr.step_modes) : schoolModes(school.id);
   modes[4] = hsApprovalMode(school.designation); // set by school type, never by saved settings
   modes[9] = 'required'; modes[10] = 'required'; // young student review is policy, not a school setting
+  // Homeschooled: no high school approval; the Private School Affidavit is reviewed by Shasta College instead.
+  modes[11] = school.kind === 'homeschool' ? 'required' : 'off';
+  if (school.kind === 'homeschool') modes[4] = 'off';
   const prog = new Map(
     (d.prepare('SELECT step_id, status, completed_at, seen, data FROM step_progress WHERE student_id = ?').all(studentId) as {
       step_id: number; status: string; completed_at: string; seen: number; data: string | null;
@@ -165,7 +176,7 @@ export function getProgress(studentId: number): StudentProgress | null {
   // A reviewer (Clear units, Prerequisite review or High school approval) sent the courses back.
   const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;
   const courses = d
-    .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method
+    .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method, r.hs_signer_email
               FROM course_requests r JOIN courses c ON c.id = r.course_id
               LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? AND r.archived_at IS NULL ORDER BY t.registration_opens, c.code`)
     .all(studentId) as RequestedCourse[];
@@ -186,6 +197,8 @@ export function getProgress(studentId: number): StudentProgress | null {
   // Prerequisite review only applies when a requested class has a prerequisite (or it already ran).
   const needsPrereq = courses.some((c) => c.prerequisite) || (prog.has(8) && prog.get(8)!.status === 'complete');
   const young = isYoung(student);
+  const adult = isAdult(student);
+  const affidavit = latestAffidavit(studentId);
   // CCAP students cleared for the maximum units in a term skip Clear units for that term (classes added later included).
   const maxCleared = new Map((d.prepare('SELECT term_id, cleared_by, cleared_at FROM unit_clearances WHERE student_id = ?').all(studentId) as
     { term_id: number; cleared_by: number; cleared_at: string }[]).map((r) => [r.term_id, r]));
@@ -199,27 +212,31 @@ export function getProgress(studentId: number): StudentProgress | null {
     if (mode === 'off') continue;
     if (def.id === 8 && !needsPrereq) continue;
     if ((def.id === 9 || def.id === 10) && !young) continue; // young students (8th grade and below) only
+    // 18 or older today: no parent consent needed (a consent already on file still shows).
+    if (def.id === 3 && adult && prog.get(3)?.status !== 'complete') continue;
     const p = prog.get(def.id);
     // High school approval is done only when every requested class (every term) is approved,
     // so adding classes later (e.g. next term) opens it again for just those classes.
     const hsDone = courses.length > 0 && courses.every((c) => c.hs_status === 'approved');
     const autoCleared = def.id === 7 && p?.status !== 'complete' && unitsByMax;
-    const isComplete = def.id === 4 ? hsDone : def.id === 5 ? registeredAll : p?.status === 'complete' || autoCleared;
+    const isComplete = def.id === 4 ? hsDone : def.id === 11 ? affidavit?.status === 'approved' : def.id === 5 ? registeredAll : p?.status === 'complete' || autoCleared;
     const maxAt = autoCleared ? courses.map((c) => maxCleared.get(c.term_id!)!.cleared_at).sort().at(-1)! : null;
     const hsAt = def.id === 4 && hsDone ? courses.map((c) => c.hs_at ?? '').sort().at(-1) || p?.completed_at || null : null;
     let status: StepStatus;
     if (isComplete) status = 'complete';
+    // The Private School Affidavit can be uploaded (and reviewed) any time; it still has to be approved before later steps.
+    else if (def.id === 11) status = affidavit?.status === 'pending' ? 'in_review' : 'current';
     else if (blocked) status = 'locked';
     else if (def.id === 2 && changeRow) status = 'changes';
     else if (def.id === 3) status = 'waiting_parent';
-    else if (def.id === 4 || def.id === 7 || def.id === 8 || def.id === 10) status = 'in_review';
+    else if (def.id === 4 || def.id === 7 || def.id === 8 || def.id === 10 || (def.id === 11 && affidavit?.status === 'pending')) status = 'in_review';
     else if (def.id === 5 && !regOpen) status = 'scheduled';
     else status = 'current';
     if (!isComplete && mode === 'required') blocked = true;
     steps.push({
       id: def.id, num: steps.length + 1, name: def.name, short: def.short, description: def.description,
-      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : def.id === 5 ? lastReg!.registered_at : autoCleared ? maxAt : p!.completed_at) : null,
-      data: def.id === 5 ? (isComplete ? { crns: lastReg!.crns } : null) : autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
+      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : def.id === 11 ? affidavit!.reviewed_at : def.id === 5 ? lastReg!.registered_at : autoCleared ? maxAt : p!.completed_at) : null,
+      data: def.id === 11 ? (affidavit ? { ...affidavit } : null) : def.id === 5 ? (isComplete ? { crns: lastReg!.crns } : null) : autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
       seen: !isComplete || !p || p.seen === 1 || def.id === 5,
     });
   }
@@ -314,7 +331,7 @@ export function completeStep(studentId: number, stepId: number, data: Record<str
 }
 
 /** A reviewer step (4, 7 or 8) sends the courses back: course selection reopens with the reviewer's note. */
-export function requestChanges(studentId: number, stepId: number, by: User, note: string) {
+export function requestChanges(studentId: number, stepId: number, by: { id: number | null }, note: string) {
   const d = db();
   tx(() => {
     // Course selection reopens, and new courses go back through every review (high school, young student, units, prerequisites).
@@ -341,6 +358,7 @@ export function reopenFrom(studentId: number, stepId: number) {
     // Moving Clear units back on purpose also drops any "cleared for maximum units" so it really reopens.
     if (later.includes(7)) d.prepare('DELETE FROM unit_clearances WHERE student_id = ?').run(studentId);
     if (later.includes(5)) d.prepare('DELETE FROM registrations WHERE student_id = ?').run(studentId);
+    if (later.includes(11)) d.prepare("UPDATE affidavits SET status = 'declined', note = COALESCE(note, 'Reopened by Shasta College') WHERE student_id = ? AND status != 'declined'").run(studentId);
   });
   if (later.includes(9)) sweepYoungDocs();
 }
@@ -473,6 +491,32 @@ export function currentGrade(u: GradeInfo): number | null {
   if (u.grad_year) return 12 - (u.grad_year - currentClassYear());
   return u.grade;
 }
+/** Age in whole years on a date (Pacific time), from a YYYY-MM-DD date of birth. */
+export function ageOn(dob: string | null | undefined, on = new Date()): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob ?? '');
+  if (!m) return null;
+  const [y, mo, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(on).split('-').map(Number);
+  let age = y - Number(m[1]);
+  if (mo < Number(m[2]) || (mo === Number(m[2]) && d < Number(m[3]))) age--;
+  return age;
+}
+/**
+ * 18 or older today: no parent consent needed. Today, not "by the time the term starts": a 17-year-old who
+ * turns 18 before registration still needs consent until their birthday.
+ */
+export const isAdult = (u: { date_of_birth?: string | null }) => (ageOn(u.date_of_birth) ?? 0) >= 18;
+
+/** Contact info and date of birth every student account needs, plus 12th graders' plans after high school. */
+export function profileMissing(u: User): string[] {
+  if (u.role !== 'student') return [];
+  const miss: string[] = [];
+  if (!u.date_of_birth) miss.push('date of birth');
+  if (!u.phone) miss.push('phone number');
+  if (!u.address_line || !u.city || !u.state || !u.zip) miss.push('address');
+  if (currentGrade(u) === 12 && u.plans_year !== currentClassYear()) miss.push('plans after high school');
+  return miss;
+}
+
 /** 8th grade or below: tagged as a young student until they reach 9th grade. */
 export const isYoung = (u: GradeInfo) => { const g = currentGrade(u); return g !== null && g <= 8; };
 /** After July 1 each year, students confirm their graduation year and grade on first sign-in. */

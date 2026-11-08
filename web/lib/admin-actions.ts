@@ -39,9 +39,10 @@ export async function addUser(formData: FormData) {
       ? (db().prepare("SELECT id FROM users WHERE role = 'counselor' AND school_id = ? ORDER BY status = 'active' DESC, id LIMIT 1").get(schoolId) as { id: number } | undefined)?.id ?? null
       : null;
     const r = db()
-      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor, is_young_approver, staff_type) VALUES (?,?,?,?,?,'invited',?,?,?,?,?,?)")
+      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, invite_token, counselor_id, admin_level, is_college_counselor, is_young_approver, is_young_lead, is_homeschool_lead, staff_type) VALUES (?,?,?,?,?,'invited',?,?,?,?,?,?,?,?)")
       .run(first, last, email, role, role === 'admin' ? null : schoolId, token, counselor, role === 'admin' ? level : null, collegeCounselor,
-        role === 'admin' && formData.get('young_approver') === 'on' ? 1 : 0, staffType);
+        role === 'admin' && formData.get('young_approver') === 'on' ? 1 : 0,
+        role === 'admin' && formData.get('young_lead') === 'on' ? 1 : 0, role === 'admin' && formData.get('homeschool_lead') === 'on' ? 1 : 0, staffType);
     const uid = Number(r.lastInsertRowid);
     if (role === 'student') {
       const termId = Number(formData.get('term'));
@@ -135,8 +136,9 @@ export async function updateAdmin(formData: FormData) {
   if (id === me.id && level !== 'super') redirect('/admin/users?role=admin&error=self');
   const primary = formData.getAll('primary').map(Number).filter((n) => n > 0);
   tx(() => {
-    db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ?, is_young_approver = ? WHERE id = ?')
-      .run(level, formData.get('college_counselor') === 'on' ? 1 : 0, formData.get('young_approver') === 'on' ? 1 : 0, id);
+    const on = (k: string) => (formData.get(k) === 'on' ? 1 : 0);
+    db().prepare('UPDATE users SET admin_level = ?, is_college_counselor = ?, is_young_approver = ?, is_young_lead = ?, is_homeschool_lead = ? WHERE id = ?')
+      .run(level, on('college_counselor'), on('young_approver'), on('young_lead'), on('homeschool_lead'), id);
     db().prepare('DELETE FROM admin_schools WHERE admin_id = ?').run(id);
     const ins = db().prepare('INSERT INTO admin_schools (admin_id, school_id) SELECT ?, id FROM schools WHERE id = ?');
     for (const sid of primary) ins.run(id, sid);

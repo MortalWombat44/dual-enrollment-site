@@ -11,7 +11,7 @@ import { StepGrid } from '@/components/StepGrid';
 export const dynamic = 'force-dynamic';
 
 /** Parent home, built on the 1a dashboard layout (4-up step grid + contact cell). */
-export default async function ParentHome({ searchParams }: { searchParams: Promise<{ student?: string; signed?: string }> }) {
+export default async function ParentHome({ searchParams }: { searchParams: Promise<{ student?: string; signed?: string; affidavit?: string }> }) {
   const me = await requireRole('parent');
   const sp = await searchParams;
   const kids = studentsForParent(me.id);
@@ -37,7 +37,13 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
           current={kids.length > 1 ? `/parent?student=${kid.id}` : undefined}
           right={<><span className="hide-sm">Student: <strong>{kid.first_name} {kid.last_name}</strong></span><span className="tag tag-neutral">Parent / guardian</span></>}
         />
-        <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : null} />
+        <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : sp.affidavit ? `Thanks. Shasta College will review ${kid.first_name}'s affidavit.` : null} />
+      {p.steps.find((s) => s.id === 11)?.status === 'current' && (
+        <div className="pad-sm" style={{ padding: '20px 40px', background: 'var(--color-accent-100)', borderBottom: '2px solid var(--color-text)', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 15 }}><strong>{kid.first_name} needs a Private School Affidavit.</strong> You or {kid.first_name} can upload it.</span>
+          <Link href={`/parent/affidavit?student=${kid.id}`} className="btn btn-primary">Upload affidavit</Link>
+        </div>
+      )}
         <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', borderBottom: '2px solid var(--color-text)' }}>
           <div className="pad-sm noborder-sm" style={{ padding: 40, borderRight: '2px solid var(--color-divider)' }}>
             <div className="kicker accent700">{p.termLabel} · Dual Enrollment</div>
@@ -95,7 +101,13 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
         current={kids.length > 1 ? `/parent?student=${kid.id}` : undefined}
         right={<><span className="hide-sm">Student: <strong>{kid.first_name} {kid.last_name}</strong></span><span className="tag tag-neutral">Parent / guardian</span></>}
       />
-      <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : null} />
+      <Flash msg={sp.signed ? `Thanks, ${me.first_name}. Your consent for ${kid.first_name} is in.` : sp.affidavit ? `Thanks. Shasta College will review ${kid.first_name}'s affidavit.` : null} />
+      {p.steps.find((s) => s.id === 11)?.status === 'current' && (
+        <div className="pad-sm" style={{ padding: '20px 40px', background: 'var(--color-accent-100)', borderBottom: '2px solid var(--color-text)', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 15 }}><strong>{kid.first_name} needs a Private School Affidavit.</strong> You or {kid.first_name} can upload it.</span>
+          <Link href={`/parent/affidavit?student=${kid.id}`} className="btn btn-primary">Upload affidavit</Link>
+        </div>
+      )}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', borderBottom: '2px solid var(--color-text)' }}>
         <div className="pad-sm noborder-sm" style={{ padding: 40, borderRight: '2px solid var(--color-divider)' }}>
           <div className="kicker accent700">{p.termLabel} · {p.school.name}</div>

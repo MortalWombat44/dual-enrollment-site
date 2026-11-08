@@ -1,13 +1,17 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireRole } from '@/lib/auth';
-import { activeTerms, archivedRequests, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
+import { activeTerms, archivedRequests, latestAffidavit, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
-import { addMoreClasses, addStudentId, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { addMoreClasses, addStudentId, submitAffidavit, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
 import { StudentIdForm } from '@/components/StudentIdForm';
 import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
+import { HelpBox } from '@/components/HelpBox';
+import { AffidavitUpload } from '@/components/AffidavitUpload';
+import { AFFIDAVIT_ERRORS } from '@/lib/affidavit';
+import { studentSendApproverLink } from '@/lib/approver-actions';
 import { PacketTable } from '@/components/PacketTable';
 import { ParentInvite } from '@/components/ParentInvite';
 import { logout } from '@/lib/session-actions';
@@ -18,14 +22,15 @@ const ERRORS: Record<string, string> = {
   id: 'Enter your Shasta College ID (letters, numbers and dashes), or check the box to skip for now.',
   none: 'Pick at least one course.',
   term: 'Pick an open term for every class.',
+  aff_file: AFFIDAVIT_ERRORS.file, aff_size: AFFIDAVIT_ERRORS.size, aff_type: AFFIDAVIT_ERRORS.type,
   docs: 'Attach both documents (PDF, JPG or PNG, up to 10 MB each).',
   ce: 'Each concurrent class needs a course code (like PSYC C1000) and units (for example 3 or 4).',
 };
 
-export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string }> }) {
+export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string; approver_link?: string; emailed?: string; help?: string }> }) {
   const me = await requireRole('student');
   const { n } = await params;
-  const { error, invited, invite_error, added } = await searchParams;
+  const { error, invited, invite_error, added, approver_link, emailed, help } = await searchParams;
   const p = getProgress(me.id);
   const s = p?.steps.find((x) => x.id === Number(n));
   if (!p || !s) notFound();
@@ -35,7 +40,8 @@ export default async function StepPage({ params, searchParams }: { params: Promi
     <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: '100vh', maxWidth: 1280, margin: '0 auto', boxShadow: '0 1px 3px rgba(0,0,0,.08)' }}>
       <Sidebar p={p} current={s.id} />
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} />}
+        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} approverLink={approver_link} emailed={emailed === '1'} />}
+        <HelpBox studentId={p.student.id} back={`/student/steps/${s.id}`} status={help} />
         <div className="pad-sm" style={{ marginTop: 'auto', borderTop: '2px solid var(--color-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 48px', gap: 12, flexWrap: 'wrap' }}>
           {s.id === 3 && s.status === 'complete' ? (
             <a href={`/consent/${p.student.id}`} className="btn btn-ghost" style={{ color: 'var(--color-accent-700)' }}>View signed consent</a>
@@ -206,7 +212,7 @@ function MoreClasses({ p, error, added }: { p: StudentProgress; error?: string; 
   );
 }
 
-function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string }) {
+function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string; approverLink?: string; emailed?: boolean }) {
   const tag = stepTag(s)!;
   const counselor = 'Your high school'; // no staff names for students
   // Course selection only changes classes in terms that are open for registration; the rest are kept as they are.
@@ -222,6 +228,7 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
       s.id === 7 ? 'Shasta College is checking your courses and unit load. Usually 1–2 days.' :
       s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
       s.id === 10 ? 'A Shasta College counselor is reviewing your documents, then Shasta College makes the final decision.' :
+      s.id === 11 ? 'Shasta College is reviewing your Private School Affidavit.' :
       'Your high school is reviewing your classes. Check with your high school counselor if you have questions.') :
     s.status === 'waiting_parent' ? (
       p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online from their own account.` :
@@ -270,6 +277,24 @@ function OpenView({ p, s, error, invited, inviteError }: { p: StudentProgress; s
             />
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
           </form>
+        )}
+        {s.id === 4 && s.status === 'in_review' && p.school.kind === 'other' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, borderLeft: '4px solid var(--color-accent)', paddingLeft: 16 }}>
+            <div style={{ fontSize: 15 }}>
+              Your approver at {p.school.name}: <strong>{p.student.hs_approver_name}</strong> ({p.student.hs_approver_email}). They approve your classes from a link, no account needed.
+              {' '}<a href="/student/account">Change approver</a>
+            </div>
+            {approverLink && (
+              <div style={{ fontSize: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span>{emailed ? `We emailed ${p.student.hs_approver_email} this link. You can also send it yourself:` : `Send this link to ${p.student.hs_approver_name}:`}</span>
+                <code style={{ wordBreak: 'break-all', background: 'var(--color-surface)', padding: '8px 10px' }}>{approverLink}</code>
+              </div>
+            )}
+            <form action={studentSendApproverLink}><button className="btn btn-secondary">{approverLink ? 'Make a new link' : `Send approval link to ${p.student.hs_approver_name}`}</button></form>
+          </div>
+        )}
+        {s.id === 11 && s.status === 'current' && (
+          <AffidavitUpload action={submitAffidavit} declinedNote={latestAffidavit(p.student.id)?.status === 'declined' ? latestAffidavit(p.student.id)?.note : null} />
         )}
         {s.id === 9 && s.status === 'current' && (
           <form action={submitYoungDocs} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

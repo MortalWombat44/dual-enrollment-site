@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { primarySchoolIds } from '@/lib/access';
 import { average, clearUnitsRecords, formatHours, hoursBetween, waitingNow } from '@/lib/reports';
 import { fmt, now } from '@/lib/workflow';
+import { currentClassYear } from '@/lib/workflow';
+import { canExportSeniors, seniorsWithPlans } from '@/lib/seniors';
 import { AdminShell } from '@/components/AdminShell';
 
 export const dynamic = 'force-dynamic';
@@ -53,6 +55,19 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
         )}
       </div>
 
+      {canExportSeniors(me) && (() => {
+        const seniors = seniorsWithPlans();
+        const n = (v: string) => seniors.filter((x) => x.plans_shasta === v).length;
+        return (
+          <div className="pad-sm" style={{ padding: '20px 40px', borderBottom: '2px solid var(--color-divider)', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div>
+              <div className="kicker">Seniors&apos; plans after high school · Class of {currentClassYear()}</div>
+              <div style={{ fontSize: 14, marginTop: 4 }}>{seniors.length} answered: {n('yes')} yes, {n('unsure')} not sure, {n('no')} no</div>
+            </div>
+            <a className="btn btn-secondary" href="/admin/seniors.csv">Download CSV</a>
+          </div>
+        );
+      })()}
       <div className="pad-sm" style={{ padding: '24px 40px 8px' }}><div className="kicker">Clear units tasks completed{who.id === me.id ? ' by you' : ''}</div></div>
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', borderTop: '2px solid var(--color-text)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label="Total" value={mine.length} hero />

@@ -89,6 +89,14 @@ export function AddUserDialog({ action, schools, terms, gradYears, error }: { ac
                 <input type="checkbox" name="young_approver" style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
                 Young Student Approver (final decision for students in 8th grade and below)
               </label>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                <input type="checkbox" name="young_lead" style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+                Young student lead (notified about young student items to review)
+              </label>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                <input type="checkbox" name="homeschool_lead" style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+                Homeschool lead (notified about homeschool items to review)
+              </label>
             </>
           )}
         </div>

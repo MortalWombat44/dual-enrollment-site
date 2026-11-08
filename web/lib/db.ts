@@ -220,6 +220,51 @@ CREATE TABLE IF NOT EXISTS file_deletions (
   files_deleted INTEGER,
   bytes_deleted INTEGER
 );
+-- Homeschooled students' Private School Affidavit uploads and the college admin's review of each.
+CREATE TABLE IF NOT EXISTS affidavits (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_id INTEGER,
+  uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  uploaded_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','approved','declined')),
+  reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  note TEXT
+);
+-- Links that let a high school approver at an unlisted school approve a student's classes without an account.
+CREATE TABLE IF NOT EXISTS approver_links (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+-- In-app notifications for college admins (also emailed when email is set up).
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,           -- 'young' | 'homeschool' | 'help'
+  student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS notifications_user ON notifications (user_id, read_at);
+-- "I need help" flags, raised by a student or their high school staff, answered by college admins.
+CREATE TABLE IF NOT EXISTS help_requests (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  raised_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  raised_role TEXT NOT NULL CHECK (raised_role IN ('student','counselor')),
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at TEXT,
+  reply TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -238,6 +283,8 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
   { id: 3, name: 'Parent consent form', short: 'Parent consent', description: 'Parent signs online (digital signature)' },
   { id: 2, name: 'Course selection', short: 'Course selection', description: "Student picks from this school's approved sections" },
   { id: 4, name: 'High school approval', short: 'High school approval', description: 'High school counselor reviews the course plan' },
+  // Homeschooled students only: the Private School Affidavit, uploaded by the student or parent, reviewed by a college admin.
+  { id: 11, name: 'Private School Affidavit', short: 'Private School Affidavit', description: 'Homeschooled students: upload the Private School Affidavit; Shasta College reviews it' },
   // Young students (8th grade and below) only: documents, then a college counselor recommends and an approver decides.
   { id: 9, name: 'Young student documents', short: 'Young student documents', description: 'Report card or transcript, and a letter from the principal (8th grade and below only)' },
   { id: 10, name: 'Young student review', short: 'Young student review', description: 'A college counselor recommends, then a Young Student Approver decides (8th grade and below only)' },
@@ -250,8 +297,8 @@ export const STEP_DEFS: { id: number; name: string; short: string; description: 
 ];
 
 export const DEFAULT_MODES: Record<'CCAP' | 'NON_CCAP', Record<number, Mode>> = {
-  CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'off', 5: 'required', 6: 'optional', 9: 'required', 10: 'required' },
-  NON_CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'required', 5: 'required', 6: 'required', 9: 'required', 10: 'required' },
+  CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'off', 5: 'required', 6: 'optional', 9: 'required', 10: 'required', 11: 'required' },
+  NON_CCAP: { 1: 'required', 2: 'required', 3: 'required', 7: 'required', 8: 'required', 4: 'required', 5: 'required', 6: 'required', 9: 'required', 10: 'required', 11: 'required' },
 };
 
 let _db: DatabaseSync | null = null;
@@ -285,6 +332,7 @@ export function db(): Db {
     conn.exec('UPDATE course_requests SET term_id = (SELECT term_id FROM enrollments e WHERE e.student_id = course_requests.student_id) WHERE term_id IS NULL');
     if (count.n === 0) approveFromStepFour(conn);
     backfillRegistrations(conn);
+    ensureHomeschool(conn);
     _db = conn;
   }
   const conn = _db;
@@ -479,6 +527,10 @@ function seed(d: DatabaseSync) {
   // Graduation years (2026–27 school year: seniors are the class of 2027), plus alumni to retire.
   d.exec("UPDATE users SET grad_year = 2027 + (12 - grade) WHERE role = 'student' AND grade IS NOT NULL");
   d.prepare("UPDATE users SET grade_confirmed_year = ? WHERE role = 'student' AND grade IS NOT NULL").run(schoolYearEnd());
+  // Demo profile details (placeholder contact info): born mid-September 18 years before graduating, so seniors are 17 this fall.
+  d.exec(`UPDATE users SET date_of_birth = printf('%d-09-15', grad_year - 18), phone = printf('(530) 555-%04d', 100 + id),
+    address_line = printf('%d Placer St', 100 + id), city = 'Redding', state = 'CA', zip = '96001' WHERE role = 'student' AND grad_year IS NOT NULL`);
+  d.prepare("UPDATE users SET plans_shasta = 'unsure', plans_year = ?, plans_at = ? WHERE role = 'student' AND grad_year = ?").run(schoolYearEnd(), new Date().toISOString(), schoolYearEnd());
   for (const [f, l, year] of [['Grace', 'Holt', 2022], ['Owen', 'Price', 2022], ['Lily', 'Shaw', 2023]] as [string, string, number][]) {
     const id = user(f, l, `${f.toLowerCase()}.${l.toLowerCase()}@alumni.example.org`, 'student', enterprise, { counselor: alvarez });
     d.prepare('UPDATE users SET grad_year = ? WHERE id = ?').run(year, id);
@@ -491,6 +543,14 @@ function seed(d: DatabaseSync) {
  * Named accounts that must exist on every database, including a freshly reset one.
  * Created only if missing, so a changed password is never overwritten.
  */
+/** The single "Other - Homeschooled" school that homeschooled students are attached to. */
+function ensureHomeschool(d: DatabaseSync) {
+  if (d.prepare("SELECT 1 FROM schools WHERE kind = 'homeschool'").get()) return;
+  const id = Number(d.prepare("INSERT INTO schools (name, district, designation, kind) VALUES ('Homeschool', 'Private School Affidavit', 'NON_CCAP', 'homeschool')").run().lastInsertRowid);
+  const ins = d.prepare('INSERT OR IGNORE INTO school_steps (school_id, step_id, mode) VALUES (?,?,?)');
+  for (const s of STEP_DEFS) ins.run(id, s.id, DEFAULT_MODES.NON_CCAP[s.id] ?? 'required');
+}
+
 /** Register used to be one step for everything: students who finished it are registered for the terms of their classes. */
 function backfillRegistrations(d: DatabaseSync) {
   if (d.prepare("SELECT 1 FROM settings WHERE key = 'registrations_backfilled'").get()) return;
@@ -555,6 +615,15 @@ function migrate(d: DatabaseSync) {
   if (!cols.includes('retired_at')) d.exec('ALTER TABLE users ADD COLUMN retired_at TEXT');
   if (!cols.includes('signature_file_id')) d.exec('ALTER TABLE users ADD COLUMN signature_file_id INTEGER');
   if (!cols.includes('is_young_approver')) d.exec('ALTER TABLE users ADD COLUMN is_young_approver INTEGER NOT NULL DEFAULT 0');
+  // Student profile: date of birth, contact info, seniors' plans after high school.
+  for (const [c, t] of [['date_of_birth', 'TEXT'], ['phone', 'TEXT'], ['address_line', 'TEXT'], ['city', 'TEXT'], ['state', 'TEXT'], ['zip', 'TEXT'],
+    ['plans_shasta', "TEXT CHECK (plans_shasta IN ('yes','no','unsure'))"], ['plans_year', 'INTEGER'], ['plans_at', 'TEXT'],
+    // Students at an unlisted ("Other") high school name their high school approver.
+    ['hs_approver_name', 'TEXT'], ['hs_approver_email', 'TEXT'],
+    // College admins who get notified about young student / homeschool items.
+    ['is_young_lead', 'INTEGER NOT NULL DEFAULT 0'], ['is_homeschool_lead', 'INTEGER NOT NULL DEFAULT 0']] as const) {
+    if (!cols.includes(c)) d.exec(`ALTER TABLE users ADD COLUMN ${c} ${t}`);
+  }
   if (!cols.includes('grade_confirmed_year')) {
     d.exec('ALTER TABLE users ADD COLUMN grade_confirmed_year INTEGER');
     // Students already here count as confirmed for this school year; they're asked again next July.
@@ -582,6 +651,14 @@ function migrate(d: DatabaseSync) {
   if (!cols.includes('is_college_counselor')) {
     d.exec('ALTER TABLE users ADD COLUMN is_college_counselor INTEGER NOT NULL DEFAULT 0');
   }
+  const scrCols = (d.prepare('PRAGMA table_info(school_change_requests)').all() as { name: string }[]).map((c) => c.name);
+  if (scrCols.length && !scrCols.includes('approver_name')) {
+    d.exec('ALTER TABLE school_change_requests ADD COLUMN approver_name TEXT');
+    d.exec('ALTER TABLE school_change_requests ADD COLUMN approver_email TEXT');
+  }
+  // Schools students typed in ("Other") and the one Homeschool entry aren't on the sign-up list.
+  const schoolCols = (d.prepare('PRAGMA table_info(schools)').all() as { name: string }[]).map((c) => c.name);
+  if (!schoolCols.includes('kind')) d.exec("ALTER TABLE schools ADD COLUMN kind TEXT NOT NULL DEFAULT 'listed' CHECK (kind IN ('listed','other','homeschool'))");
   const termCols = (d.prepare('PRAGMA table_info(terms)').all() as { name: string }[]).map((c) => c.name);
   if (!termCols.includes('summer')) {
     d.exec('ALTER TABLE terms ADD COLUMN summer INTEGER NOT NULL DEFAULT 0');
@@ -609,6 +686,7 @@ function migrate(d: DatabaseSync) {
   const courseCols2 = (d.prepare('PRAGMA table_info(courses)').all() as { name: string }[]).map((c) => c.name);
   if (!courseCols2.includes('offered_term_id')) d.exec('ALTER TABLE courses ADD COLUMN offered_term_id INTEGER REFERENCES terms(id) ON DELETE SET NULL');
   const reqCols2 = (d.prepare('PRAGMA table_info(course_requests)').all() as { name: string }[]).map((c) => c.name);
+  if (!reqCols2.includes('hs_signer_email')) d.exec('ALTER TABLE course_requests ADD COLUMN hs_signer_email TEXT'); // outside approver (unlisted school)
   if (!reqCols2.includes('archived_at')) {
     d.exec('ALTER TABLE course_requests ADD COLUMN archived_at TEXT');
     d.exec('ALTER TABLE course_requests ADD COLUMN archived_reason TEXT');
@@ -625,7 +703,7 @@ function migrate(d: DatabaseSync) {
   }
   // Steps 7 (Clear units), 8 (Prerequisite review), 9 + 10 (young students) arrived after launch: add them, on for every school.
   if (d.prepare('SELECT 1 FROM steps WHERE id = 1').get()) {
-    for (const id of [7, 8, 9, 10]) {
+    for (const id of [7, 8, 9, 10, 11]) {
       if (d.prepare('SELECT 1 FROM steps WHERE id = ?').get(id)) continue;
       const def = STEP_DEFS.find((x) => x.id === id)!;
       d.prepare('INSERT INTO steps (id, name, short_name, description) VALUES (?,?,?,?)').run(def.id, def.name, def.short, def.description);

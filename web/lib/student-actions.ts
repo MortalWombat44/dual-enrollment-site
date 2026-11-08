@@ -2,8 +2,14 @@
 import { redirect } from 'next/navigation';
 import { requireRole } from './auth';
 import { cryptoToken, db, sweepYoungDocs, tx } from './db';
-import { activeTerms, addRequest, ceCourse, completeStep, currentClassYear, getProgress, GRADES, parseCe, schoolCourses } from './workflow';
+import { activeTerms, addRequest, ceCourse, completeStep, currentClassYear, currentGrade, getProgress, GRADES, parseCe, schoolCourses } from './workflow';
 import { saveFile, sniff } from './files';
+import { resolveSchool, type SchoolChoice } from './schools';
+import { sendApproverLink } from './approver-links';
+import { mailConfigured } from './mail';
+import { saveAffidavit } from './affidavit';
+import { notifyLeads } from './notify';
+import { parseProfile, type ProfileInput } from './profile';
 import { MAX_UPLOAD_BYTES } from './constants';
 
 
@@ -38,6 +44,13 @@ export async function addStudentId(formData: FormData) {
   if (!/^[A-Za-z0-9-]{4,20}$/.test(num)) redirect('/student/steps/1?error=id');
   db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
   redirect('/student?id_added=1');
+}
+
+/** Students at an unlisted school: email their named approver a link when classes are waiting (if email is set up). */
+async function emailApproverIfNeeded(studentId: number) {
+  const p = getProgress(studentId);
+  // Without email set up, the student sends the link themselves (a new link would cancel one they already shared).
+  if (mailConfigured() && p?.school.kind === 'other' && p.steps.find((s) => s.id === 4)?.status === 'in_review') await sendApproverLink(studentId);
 }
 
 /** Reads the course picker: Dual Enrollment checkboxes (each with a term) and typed-in Concurrent classes. */
@@ -88,7 +101,7 @@ export async function addMoreClasses(formData: FormData) {
       db().prepare('DELETE FROM young_reviews WHERE student_id = ?').run(me.id);
     }
   });
-  if (added) sweepYoungDocs();
+  if (added) { sweepYoungDocs(); await emailApproverIfNeeded(me.id); }
   redirect(`${back}?added=${added}`);
 }
 
@@ -121,6 +134,7 @@ export async function submitCourses(formData: FormData) {
   });
   const total = getProgress(me.id)!.courses.reduce((n, c) => n + c.units, 0);
   completeStep(me.id, 2, { units: total });
+  await emailApproverIfNeeded(me.id);
   redirect('/student/steps/2/complete');
 }
 
@@ -175,13 +189,16 @@ export async function inviteParent(formData: FormData) {
 
 export async function requestSchoolChange(formData: FormData) {
   const me = await requireRole('student');
-  const to = Number(formData.get('school'));
   const note = String(formData.get('note') || '').trim().slice(0, 500) || null;
-  if (!to || to === me.school_id || !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(to)) redirect('/student/account?error=school');
+  const choice = resolveSchool(formData);
+  if ('error' in choice) redirect(`/student/account?error=${choice.error}`);
+  const c = choice as SchoolChoice;
+  if (c.schoolId === me.school_id && !c.approverEmail) redirect('/student/account?error=school');
   tx(() => {
     // One open request at a time: a new one replaces the old.
     db().prepare("DELETE FROM school_change_requests WHERE student_id = ? AND status = 'open'").run(me.id);
-    db().prepare('INSERT INTO school_change_requests (student_id, from_school_id, to_school_id, note) VALUES (?,?,?,?)').run(me.id, me.school_id, to, note);
+    db().prepare('INSERT INTO school_change_requests (student_id, from_school_id, to_school_id, note, approver_name, approver_email) VALUES (?,?,?,?,?,?)')
+      .run(me.id, me.school_id, c.schoolId, note, c.approverName, c.approverEmail);
   });
   redirect('/student/account?saved=school_request');
 }
@@ -207,7 +224,11 @@ export async function confirmGrade(formData: FormData) {
   const gradYear = Number(formData.get('grad_year'));
   const thisClass = currentClassYear();
   if (!GRADES.includes(grade) || !Number.isInteger(gradYear) || gradYear < thisClass || gradYear > thisClass + 12) redirect('/confirm-grade?error=1');
+  // 12th graders say whether they plan to attend Shasta College after high school.
+  const plans = String(formData.get('plans') || '');
+  if (grade === 12 && !['yes', 'no', 'unsure'].includes(plans)) redirect('/confirm-grade?error=plans');
   db().prepare('UPDATE users SET grade = ?, grad_year = ?, grade_confirmed_year = ? WHERE id = ?').run(grade, gradYear, thisClass, me.id);
+  if (grade === 12) db().prepare('UPDATE users SET plans_shasta = ?, plans_year = ?, plans_at = ? WHERE id = ?').run(plans, thisClass, new Date().toISOString(), me.id);
   redirect('/student');
 }
 
@@ -236,5 +257,39 @@ export async function submitYoungDocs(formData: FormData) {
   }
   for (const b of bufs) ids[b.field] = saveFile({ studentId: me.id, uploadedBy: me.id, kind: b.kind, filename: b.name, mime: b.mime, data: b.buf });
   completeStep(me.id, 9, { transcript_file_id: ids.transcript, letter_file_id: ids.letter });
+  await notifyLeads('young', me.id, `${me.first_name} ${me.last_name} (young student) sent a report card and principal letter; a college counselor recommendation is needed.`);
   redirect('/student/steps/9/complete');
+}
+
+/** Date of birth, phone, address (and 12th graders' plans). From the profile prompt or the account page. */
+export async function saveProfile(formData: FormData) {
+  const me = await requireRole('student');
+  const from = formData.get('from') === 'account' ? '/student/account' : '/complete-profile';
+  const senior = currentGrade(me) === 12;
+  const r = parseProfile(formData, senior && from === '/complete-profile');
+  if ('error' in r) redirect(`${from}?error=${r.error}`);
+  const v = r as ProfileInput;
+  db().prepare('UPDATE users SET date_of_birth = ?, phone = ?, address_line = ?, city = ?, state = ?, zip = ? WHERE id = ?')
+    .run(v.dob, v.phone, v.address, v.city, v.state, v.zip, me.id);
+  if (senior && v.plans) db().prepare('UPDATE users SET plans_shasta = ?, plans_year = ?, plans_at = ? WHERE id = ?').run(v.plans, currentClassYear(), new Date().toISOString(), me.id);
+  redirect(from === '/student/account' ? '/student/account?saved=profile' : '/student');
+}
+
+/** Students at an unlisted high school can update who approves their classes there. */
+export async function saveHsApprover(formData: FormData) {
+  const me = await requireRole('student');
+  const name = String(formData.get('approver_name') || '').trim().slice(0, 120);
+  const email = String(formData.get('approver_email') || '').trim().toLowerCase().slice(0, 200);
+  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) redirect('/student/account?error=approver');
+  db().prepare('UPDATE users SET hs_approver_name = ?, hs_approver_email = ? WHERE id = ?').run(name, email, me.id);
+  redirect('/student/account?saved=approver');
+}
+
+/** Homeschooled students upload their Private School Affidavit; a college admin reviews it. */
+export async function submitAffidavit(formData: FormData) {
+  const { me } = await stepFor(11, ['current']);
+  const err = await saveAffidavit(me.id, me.id, formData.get('affidavit'));
+  if (err) redirect(`/student/steps/11?error=aff_${err}`);
+  await notifyLeads('homeschool', me.id, `${me.first_name} ${me.last_name} uploaded a Private School Affidavit to review.`);
+  redirect('/student/steps/11');
 }

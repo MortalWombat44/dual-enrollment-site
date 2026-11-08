@@ -1,11 +1,13 @@
+import { unreadCount } from '@/lib/notify';
 import Link from 'next/link';
 import type { User } from '@/lib/auth';
 import { logout } from '@/lib/session-actions';
 import { retireNudge } from '@/lib/retire';
 import { dismissRetireReminder } from '@/lib/admin-actions';
 
-export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'roster' | 'users' | 'schools' | 'courses' | 'terms' | 'audit' | 'files' | 'reports'; children: React.ReactNode }) {
+export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'roster' | 'users' | 'schools' | 'courses' | 'terms' | 'audit' | 'files' | 'reports' | 'notifications'; children: React.ReactNode }) {
   const isSuper = me.admin_level === 'super';
+  const unread = unreadCount(me.id);
   // Each June, remind super admins to retire the class from 4 years ago.
   const nudge = isSuper ? retireNudge() : null;
   const link = (key: typeof current, href: string, label: string) => (
@@ -25,6 +27,7 @@ export function AdminShell({ me, current, children }: { me: User; current: 'stud
           {isSuper && link('audit', '/admin/audit', 'Audit')}
           {isSuper && link('files', '/admin/files', 'Student files')}
           {link('reports', '/admin/reports', 'Reports')}
+          {link('notifications', '/admin/notifications', unread ? `Notifications · ${unread}` : 'Notifications')}
         </nav>
         <div className="admin-me">
           {me.first_name} {me.last_name}<br />

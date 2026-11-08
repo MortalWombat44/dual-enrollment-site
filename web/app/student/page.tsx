@@ -4,11 +4,12 @@ import { getProgress, fmt, pad, displayName } from '@/lib/workflow';
 import { dashboardLine, upNextLine, completionCopy } from '@/lib/stepcopy';
 import { TopBar, SegBar } from '@/components/chrome';
 import { StepGrid } from '@/components/StepGrid';
+import { HelpBox } from '@/components/HelpBox';
 import { STUDENT_NAV } from './nav';
 
 export const dynamic = 'force-dynamic';
 
-export default async function StudentDashboard({ searchParams }: { searchParams: Promise<{ id_added?: string }> }) {
+export default async function StudentDashboard({ searchParams }: { searchParams: Promise<{ id_added?: string; help?: string }> }) {
   const sp = await searchParams;
   const me = await requireRole('student');
   const p = getProgress(me.id);
@@ -87,6 +88,7 @@ export default async function StudentDashboard({ searchParams }: { searchParams:
         )}
         <StepGrid p={p} hrefBase="/student/steps" />
       </div>
+      <HelpBox studentId={p.student.id} back="/student" status={sp.help} />
     </div>
   );
 }

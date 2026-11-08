@@ -3,6 +3,9 @@ import { redirect } from 'next/navigation';
 import { db, tx } from './db';
 import { currentClassYear, currentTerm, GRADES } from './workflow';
 import { createSession, destroySession, HOME, type Role } from './auth';
+import { resolveSchool, type SchoolChoice } from './schools';
+import { parseProfile, type ProfileInput } from './profile';
+import { notifyLeads } from './notify';
 import { hashPassword, verifyPassword } from './password';
 import { clearFailures, createResetToken, lockedMinutes, MAX_RESETS_PER_HOUR, recentResets, recordFailure, resetTokenUser, RESET_MINUTES, useResetTokens } from './security';
 import { demoMode, sendMail } from './mail';
@@ -63,32 +66,44 @@ export async function signUp(formData: FormData) {
   const email = String(formData.get('email') || '').trim().toLowerCase().slice(0, 200);
   const password = String(formData.get('password') || '');
   const confirm = String(formData.get('confirm') || '');
-  const schoolId = Number(formData.get('school'));
+
   const num = String(formData.get('student_number') || '').trim().slice(0, 20) || null;
   const gradYear = Number(formData.get('grad_year'));
   const grade = Number(formData.get('grade'));
-  const keep = new URLSearchParams({ first, last, email, school: String(schoolId || ''), id: num ?? '', grad: String(gradYear || ''), grade: String(grade || '') });
+  const keep = new URLSearchParams({ first, last, email, id: num ?? '', grad: String(gradYear || ''), grade: String(grade || '') });
   const fail = (e: string) => redirect(`/signup?error=${e}&${keep}`);
   if (!first || !last) fail('name');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('email');
   if (password.length < 8 || password !== confirm) fail('password');
-  if (!schoolId || !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) fail('school');
+  const school = resolveSchool(formData);
+  if ('error' in school) fail(school.error);
+  const profile = parseProfile(formData, grade === 12);
+  if ('error' in profile) fail(profile.error);
   if (num && !/^[A-Za-z0-9-]+$/.test(num)) fail('id');
   const thisClass = currentClassYear();
   if (!Number.isInteger(gradYear) || gradYear < thisClass || gradYear > thisClass + 12) fail('grad');
   if (!GRADES.includes(grade)) fail('grade');
   if (db().prepare('SELECT 1 FROM users WHERE email = ?').get(email)) fail('exists');
+  const sc = school as SchoolChoice, pr = profile as ProfileInput;
+  const schoolId = sc.schoolId;
   const id = tx(() => {
     const counselor = db()
       .prepare("SELECT id FROM users WHERE role = 'counselor' AND school_id = ? ORDER BY status = 'active' DESC, id LIMIT 1")
       .get(schoolId) as { id: number } | undefined;
     // A Shasta College ID already on another account is allowed here; college admins see it flagged.
     const uid = Number(db()
-      .prepare("INSERT INTO users (first_name, last_name, email, role, school_id, status, password_hash, student_number, counselor_id, grad_year, grade, grade_confirmed_year) VALUES (?,?,?,'student',?,'active',?,?,?,?,?,?)")
-      .run(first, last, email, schoolId, hashPassword(password), num, counselor?.id ?? null, gradYear, grade, thisClass).lastInsertRowid);
+      .prepare(`INSERT INTO users (first_name, last_name, email, role, school_id, status, password_hash, student_number, counselor_id, grad_year, grade, grade_confirmed_year,
+        date_of_birth, phone, address_line, city, state, zip, plans_shasta, plans_year, plans_at, hs_approver_name, hs_approver_email)
+        VALUES (?,?,?,'student',?,'active',?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(first, last, email, schoolId, hashPassword(password), num, counselor?.id ?? null, gradYear, grade, thisClass,
+        pr.dob, pr.phone, pr.address, pr.city, pr.state, pr.zip, pr.plans, pr.plans ? thisClass : null, pr.plans ? new Date().toISOString() : null,
+        sc.approverName, sc.approverEmail).lastInsertRowid);
     db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, currentTerm().id);
     return uid;
   });
+  if (db().prepare("SELECT 1 FROM schools WHERE id = ? AND kind = 'homeschool'").get(schoolId)) {
+    await notifyLeads('homeschool', id, `New homeschooled student: ${first} ${last}. They'll upload a Private School Affidavit to review.`);
+  }
   await createSession(id);
   redirect('/student');
 }

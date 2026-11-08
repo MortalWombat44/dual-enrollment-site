@@ -1,3 +1,4 @@
+import { StudentContact } from '@/components/StudentContact';
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
@@ -7,6 +8,8 @@ import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
 import { ApproveSignForm } from '@/components/ApproveSignForm';
 import { ArchivedRequests } from '@/components/ArchivedRequests';
+import { staffFlagHelp } from '@/lib/help-actions';
+import { helpRequests } from '@/lib/help';
 import type { User } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -44,13 +47,13 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
     return '/counselor' + (s ? '?' + s : '');
   };
   const flash = sp.done === 'approved' ? `Approved ${sp.name}'s courses. Shasta College clears their units next.` : sp.done === 'changes' ? `Sent ${sp.name}'s plan back with your note.`
-    : sp.done === 'grade' ? 'Grade and graduation year saved.' : sp.done === 'id_request' ? 'ID change request sent to Shasta College.' : null;
+    : sp.done === 'grade' ? 'Grade and graduation year saved.' : sp.done === 'id_request' ? 'ID change request sent to Shasta College.' : sp.done === 'help' ? 'Flagged for help. Shasta College staff will follow up.' : null;
 
   return (
     <div className="frame">
       <TopBar user={me} nav={[{ href: '/counselor', label: 'Review queue' }]} current="/counselor" right={<span className="tag tag-neutral">Counselor · {school?.name.replace('High School', 'HS') ?? '—'}</span>} />
       <Flash msg={flash} />
-      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows why a class was declined.' : sp.error === 'decide' ? 'Approve or decline every class.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : null} error />
+      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows why a class was declined.' : sp.error === 'decide' ? 'Approve or decline every class.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : sp.error === 'help' ? 'Say where the student is stuck.' : null} error />
       {counselorOff && <Flash msg={`High school approval is turned off for ${school?.name}. New students skip this step.`} />}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label="Waiting on you" value={String(groups.ready.length)} hero />
@@ -116,6 +119,7 @@ function ReviewPanel({ p, me }: { p: StudentProgress | null; me: User }) {
         <div className="kicker accent700">{canAct ? 'Reviewing' : s4?.status === 'complete' ? 'Approved' : 'In progress'}</div>
         <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}</div>
         <div style={{ fontSize: 14, marginTop: 2 }}>{classLabel(p.student)} · ID {p.student.student_number ?? '—'}</div>
+        <StudentContact s={p.student} approver />
       </div>
       <div className="pad-sm" style={{ padding: '20px 32px', borderBottom: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {before.map((s) => (
@@ -146,6 +150,15 @@ function ReviewPanel({ p, me }: { p: StudentProgress | null; me: User }) {
         <div className="pad-sm" style={{ padding: '20px 32px', fontSize: 14 }}>Your note: “{String(s4.data.note)}”</div>
       ) : null}
       <ArchivedRequests studentId={p.student.id} style={{ padding: '20px 32px', borderTop: '2px solid var(--color-divider)' }} />
+      <form action={staffFlagHelp} className="pad-sm" style={{ padding: '20px 32px', borderTop: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <input type="hidden" name="studentId" value={p.student.id} />
+        <div className="kicker">Flag for Shasta College help</div>
+        {helpRequests(p.student.id).filter((h) => h.status === 'open').map((h) => (
+          <div key={h.id} style={{ fontSize: 13 }} className="ink60">Open since {fmt(h.created_at)} ({h.raised_role === 'student' ? 'from the student' : `from ${h.by_name ?? 'staff'}`}): “{h.message}”</div>
+        ))}
+        <textarea name="message" className="input" required minLength={3} maxLength={1000} placeholder="Where is the student stuck?" style={{ minHeight: 60, resize: 'none' }} aria-label="Where is the student stuck?" />
+        <div><button className="btn btn-secondary">Flag for help</button></div>
+      </form>
       <StudentRecord p={p} />
     </div>
   );

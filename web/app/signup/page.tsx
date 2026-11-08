@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { currentUser, HOME } from '@/lib/auth';
-import { db } from '@/lib/db';
 import { signUp } from '@/lib/session-actions';
+import { listedSchools, SCHOOL_ERRORS } from '@/lib/schools';
+import { PROFILE_ERRORS } from '@/lib/profile';
+import { SchoolPicker } from '@/components/SchoolPicker';
+import { ProfileFields } from '@/components/ProfileFields';
 import { currentClassYear, GRADES, ordinal } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +19,8 @@ const ERRORS: Record<string, string> = {
   exists: 'There is already an account with that email. Sign in instead.',
   grad: 'Pick your high school graduation year.',
   grade: 'Pick the grade you are in.',
+  ...SCHOOL_ERRORS,
+  ...PROFILE_ERRORS,
 };
 
 type SP = { error?: string; first?: string; last?: string; email?: string; school?: string; id?: string; grad?: string; grade?: string };
@@ -24,7 +29,7 @@ export default async function SignUp({ searchParams }: { searchParams: Promise<S
   const u = await currentUser();
   if (u) redirect(HOME[u.role]);
   const sp = await searchParams;
-  const schools = db().prepare('SELECT id, name, district FROM schools ORDER BY name').all() as { id: number; name: string; district: string }[];
+  const schools = listedSchools();
   const gradYears = Array.from({ length: 13 }, (_, i) => currentClassYear() + i);
   return (
     <div className="frame">
@@ -42,13 +47,7 @@ export default async function SignUp({ searchParams }: { searchParams: Promise<S
             <div className="field"><label htmlFor="last">Last name</label><input id="last" name="last" className="input" required defaultValue={sp.last} autoComplete="family-name" /></div>
           </div>
           <div className="field"><label htmlFor="email">Email</label><input id="email" name="email" type="email" className="input" required defaultValue={sp.email} autoComplete="email" /></div>
-          <div className="field">
-            <label htmlFor="school">Your high school</label>
-            <select id="school" name="school" className="input" required defaultValue={sp.school ?? ''}>
-              <option value="" disabled>Pick your high school…</option>
-              {schools.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.district}</option>)}
-            </select>
-          </div>
+          <SchoolPicker schools={schools} />
           <div className="field">
             <label htmlFor="grade">Grade you're in this school year</label>
             <select id="grade" name="grade" className="input" required defaultValue={sp.grade ?? ''} style={{ maxWidth: 360 }}>
@@ -63,6 +62,7 @@ export default async function SignUp({ searchParams }: { searchParams: Promise<S
               {gradYears.map((y) => <option key={y} value={y}>Class of {y}</option>)}
             </select>
           </div>
+          <ProfileFields gradeSelectId="grade" />
           <div className="field">
             <label htmlFor="sid">Shasta College ID (if you have one)</label>
             <input id="sid" name="student_number" className="input" defaultValue={sp.id} placeholder="You get this after applying on CCCApply" style={{ maxWidth: 360 }} />

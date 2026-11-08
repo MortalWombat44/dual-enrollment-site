@@ -2,20 +2,23 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, adminSendApproverLink, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
+import { StudentContact } from '@/components/StudentContact';
 import { Flash } from '@/components/chrome';
 import { ArchivedRequests } from '@/components/ArchivedRequests';
+import { helpRequests, openHelpStudentIds } from '@/lib/help';
+import { resolveHelp } from '@/lib/help-actions';
 import { primarySchoolIds } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'units' | 'prereq' | 'young' | 'school' | 'idreq' | 'ids' | 'all';
-type SP = { classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
+type Tab = 'help' | 'units' | 'prereq' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
+type SP = { link?: string; emailed?: string; classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const DONE: Record<string, string> = {
   cleared: 'Units cleared. The student moves to the next step.',
@@ -24,6 +27,10 @@ const DONE: Record<string, string> = {
   moved: 'Step marked complete.',
   reopened: 'Step reopened, along with every step after it.',
   course_added: 'Class added to the request.',
+  affidavit_ok: 'Private School Affidavit approved.',
+  help_resolved: 'Help request resolved. The student sees your reply.',
+  help_already: 'That help request was already resolved.',
+  affidavit_declined: 'Affidavit declined. The student and parent see your note and can upload a new one.',
   young_rec: 'Recommendation saved. A Young Student Approver makes the final decision.',
   young_approved: 'Approved. The student moves on to Clear units.',
   young_declined: 'Declined. The student sees your note on Course selection.',
@@ -38,6 +45,7 @@ const DONE: Record<string, string> = {
   id_change_declined: 'ID change request declined.',
 };
 const ERR: Record<string, string> = {
+  no_approver: 'This student has no high school approver email on file.',
   ce: 'A concurrent class needs a course code (like PSYC C1000) and units.',
   note: 'Add a note so the student knows what to change.',
   decide: 'Approve or decline every class with a prerequisite.',
@@ -65,16 +73,19 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   const all = ids.map(getProgress).filter((p): p is StudentProgress => !!p && inTerm(p));
   const waitingOn = (p: StudentProgress, id: number) => p.steps.find((s) => s.id === id)?.status === 'in_review';
   const shared = sharedStudentIds();
+  const helpOpen = openHelpStudentIds();
   const groups: Record<Tab, StudentProgress[]> = {
     units: all.filter((p) => waitingOn(p, 7)),
     prereq: all.filter((p) => waitingOn(p, 8)),
     young: all.filter((p) => waitingOn(p, 10)),
+    homeschool: all.filter((p) => waitingOn(p, 11)),
+    help: all.filter((p) => helpOpen.has(p.student.id)),
     school: all.filter((p) => !!openSchoolChange(p.student.id)),
     idreq: all.filter((p) => !!openIdChange(p.student.id)),
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
     all,
   };
-  const tab: Tab = (['prereq', 'young', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
+  const tab: Tab = (['help', 'prereq', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
@@ -119,7 +130,10 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
           <button className="btn btn-secondary">Filter</button>
         </form>
       </div>
-      <Flash msg={sp.done === 'hs_already'
+      {sp.done === 'approver_link' && sp.link && (
+        <div className="flash" role="status">{sp.emailed === '1' ? 'Emailed the approver a new link. ' : 'Email isn’t set up, so send the approver this link: '}<code style={{ wordBreak: 'break-all' }}>{sp.link}</code></div>
+      )}
+      <Flash msg={sp.done === 'approver_link' ? null : sp.done === 'hs_already'
         ? `These requests were already approved by the high school${sp.classes ? `: ${sp.classes}` : ''}. Approvals stay with each class, so High school approval can't be moved back. To change a class, remove it or move it to another term; the new request goes back to the high school.`
         : sp.done ? DONE[sp.done] : null} />
       <Flash error msg={sp.error ? ERR[sp.error] : null} />
@@ -132,10 +146,16 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 420px', flex: 1 }}>
         <div className="pad-sm noborder-sm" style={{ padding: '24px 32px 40px', borderRight: '2px solid var(--color-text)', minWidth: 0 }}>
           <div className="seg" style={{ marginBottom: 14 }}>
+            {(groups.help.length > 0 || tab === 'help') && (
+              <Link className="seg-opt" href={href({ tab: 'help' })} aria-current={tab === 'help'}>Help · {groups.help.length}</Link>
+            )}
             <Link className="seg-opt" href={href({ tab: 'units' })} aria-current={tab === 'units'}>Clear units · {groups.units.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'prereq' })} aria-current={tab === 'prereq'}>Prerequisites · {groups.prereq.length}</Link>
             {(groups.young.length > 0 || tab === 'young') && (
               <Link className="seg-opt" href={href({ tab: 'young' })} aria-current={tab === 'young'}>Young students · {groups.young.length}</Link>
+            )}
+            {(groups.homeschool.length > 0 || tab === 'homeschool') && (
+              <Link className="seg-opt" href={href({ tab: 'homeschool' })} aria-current={tab === 'homeschool'}>Homeschool · {groups.homeschool.length}</Link>
             )}
             <Link className="seg-opt" href={href({ tab: 'school' })} aria-current={tab === 'school'}>School changes · {groups.school.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'idreq' })} aria-current={tab === 'idreq'}>ID changes · {groups.idreq.length}</Link>
@@ -204,6 +224,9 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   const s9 = p.steps.find((s) => s.id === 9);
   const maxTerms = maxUnitTerms(p.student.id);
   const s10 = p.steps.find((s) => s.id === 10);
+  const s11 = p.steps.find((s) => s.id === 11);
+  const aff = s11?.status === 'in_review' ? latestAffidavit(p.student.id) : null;
+  const helpList = helpRequests(p.student.id);
   const rec = s10?.status === 'in_review' ? youngRecommendation(p.student.id) : null;
   const recBy = rec ? (db().prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(rec.rec_by) as { first_name: string; last_name: string } | undefined) : undefined;
   const offered = schoolCourses(p.school.id);
@@ -214,6 +237,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         <div className="kicker accent700">{p.next ? `Step ${pad(p.next.num)} · ${p.next.short}` : 'All steps done'}</div>
         <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}{isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}</div>
         <div style={{ fontSize: 14, marginTop: 2 }}>{p.termLabel} · {p.school.name} · {classLabel(p.student)} · ID {p.student.student_number ?? '—'}</div>
+        <StudentContact s={p.student} approver />
       </div>
 
       {change && (
@@ -297,6 +321,33 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
+      {helpList.filter((h) => h.status === 'open').map((h) => (
+        <form key={h.id} className="pad-sm" style={{ ...section, background: '#fff4e0' }}>
+          <Hidden p={p} keep={keep} />
+          <input type="hidden" name="helpId" value={h.id} />
+          <div className="kicker" style={{ color: '#8a4b00' }}>Needs help · {h.raised_role === 'student' ? 'from the student' : `flagged by ${h.by_name ?? 'high school staff'} (high school)`} · {fmt(h.created_at)}</div>
+          <div style={{ fontSize: 15 }}>“{h.message}”</div>
+          <div className="field"><label htmlFor={`reply${h.id}`}>Reply to the student (optional)</label><textarea id={`reply${h.id}`} name="reply" className="input" maxLength={1000} style={{ minHeight: 50, resize: 'none' }} /></div>
+          <button formAction={resolveHelp} className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>Mark resolved</button>
+        </form>
+      ))}
+
+      {s11?.status === 'in_review' && aff && (
+        <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
+          <Hidden p={p} keep={keep} />
+          <div className="kicker accent700">Private School Affidavit · homeschooled</div>
+          <div style={{ fontSize: 14 }}>
+            Uploaded {fmt(aff.uploaded_at)}{aff.file_id ? <> · <a href={`/files/${aff.file_id}`} target="_blank" rel="noreferrer">Open the affidavit</a></> : ' · file no longer on file'}
+          </div>
+          <div className="seg seg-modes" role="radiogroup" aria-label="Affidavit decision" style={{ alignSelf: 'flex-start' }}>
+            <label className="seg-opt" data-v="required"><input type="radio" name="decision" value="approve" />Approve</label>
+            <label className="seg-opt" data-v="off"><input type="radio" name="decision" value="decline" />Decline</label>
+          </div>
+          <div className="field"><label htmlFor="n11">Note (required if you decline; the student and parent see it)</label><textarea id="n11" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} /></div>
+          <button formAction={reviewAffidavit} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decision <span>→</span></button>
+        </form>
+      )}
+
       {s10?.status === 'in_review' && (
         <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
           <Hidden p={p} keep={keep} />
@@ -342,6 +393,14 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
+      {p.school.kind === 'other' && p.steps.find((x) => x.id === 4)?.status === 'in_review' && (
+        <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
+          <Hidden p={p} keep={keep} />
+          <div className="kicker accent700">High school approval · unlisted school</div>
+          <div style={{ fontSize: 14 }}>{p.school.name} isn&apos;t on the school list. {p.student.hs_approver_name} ({p.student.hs_approver_email ?? 'no email'}) approves by link.</div>
+          <button formAction={adminSendApproverLink} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Send a new approval link</button>
+        </form>
+      )}
       <ArchivedRequests studentId={p.student.id} style={{ ...section, background: '#fdf6ec' }} />
 
       <div className="pad-sm" style={section}>
