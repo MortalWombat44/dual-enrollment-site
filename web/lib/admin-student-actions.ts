@@ -30,7 +30,14 @@ export async function clearUnits(formData: FormData) {
   const { me, studentId, p, note } = await load(formData);
   if (p.steps.find((s) => s.id === 7)?.status !== 'in_review') redirect(back(formData));
   // school_id records which school the student was at, for the Reports page.
-  completeStep(studentId, 7, { admin_id: me.id, school_id: p.school.id, note, units: p.courses.reduce((n, c) => n + c.units, 0) }, true);
+  // CCAP only: "cleared for the maximum units" for the terms of these classes, so Clear units doesn't come back for them.
+  const maxUnits = p.school.designation === 'CCAP' && formData.get('max_units') === 'on';
+  if (maxUnits) {
+    const ins = db().prepare('INSERT OR REPLACE INTO unit_clearances (student_id, term_id, cleared_by, cleared_at) VALUES (?,?,?,?)');
+    const at = new Date().toISOString();
+    for (const t of p.requestTerms) ins.run(studentId, t.id, me.id, at);
+  }
+  completeStep(studentId, 7, { admin_id: me.id, school_id: p.school.id, note, units: p.courses.reduce((n, c) => n + c.units, 0), max_units: maxUnits || undefined }, true);
   redirect(back(formData, { done: 'cleared' }));
 }
 

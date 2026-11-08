@@ -177,6 +177,15 @@ CREATE TABLE IF NOT EXISTS young_reviews (
   rec_note TEXT NOT NULL,
   rec_at TEXT NOT NULL
 );
+-- CCAP students cleared for the maximum units in a term: Clear units doesn't come back for that term.
+-- Staff only; students aren't told.
+CREATE TABLE IF NOT EXISTS unit_clearances (
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+  cleared_by INTEGER NOT NULL REFERENCES users(id),
+  cleared_at TEXT NOT NULL,
+  PRIMARY KEY (student_id, term_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT

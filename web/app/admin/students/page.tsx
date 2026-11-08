@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
   adminAddCourse, adminCompleteStep, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
@@ -199,6 +199,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   const s7 = p.steps.find((s) => s.id === 7);
   const s8 = p.steps.find((s) => s.id === 8);
   const s9 = p.steps.find((s) => s.id === 9);
+  const maxTerms = maxUnitTerms(p.student.id);
   const s10 = p.steps.find((s) => s.id === 10);
   const rec = s10?.status === 'in_review' ? youngRecommendation(p.student.id) : null;
   const recBy = rec ? (db().prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(rec.rec_by) as { first_name: string; last_name: string } | undefined) : undefined;
@@ -260,6 +261,12 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <input type="hidden" name="stepId" value={7} />
           <div className="kicker accent700">Clear units</div>
           <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact />
+          {p.school.designation === 'CCAP' && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
+              <input type="checkbox" name="max_units" style={{ width: 18, height: 18, marginTop: 2, accentColor: 'var(--color-accent)' }} />
+              <span>Cleared for the maximum units for {p.requestTerms.map((t) => t.name).join(' and ') || 'this term'}. Classes added later in {p.requestTerms.length > 1 ? 'these terms' : 'this term'} won't come back to Clear units. <span className="ink60">(Staff only; not shown to the student.)</span></span>
+            </label>
+          )}
           <div className="field"><label htmlFor="n7">Note to student (required to send back)</label><textarea id="n7" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} /></div>
           <button formAction={clearUnits} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Clear units <span>→</span></button>
           <button formAction={sendBackToStudent} className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>Send back to student</button>
@@ -334,6 +341,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
 
       <div className="pad-sm" style={section}>
         <div className="kicker">Steps · move forward or back</div>
+        {maxTerms.length > 0 && <div style={{ fontSize: 13 }}>Cleared for maximum units: <strong>{maxTerms.join(', ')}</strong>{p.school.designation !== 'CCAP' ? ' (not used: no longer at a CCAP school)' : ''}. Moving Clear units back removes this.</div>}
         {p.steps.map((s) => (
           <form key={s.id} style={{ display: 'grid', gridTemplateColumns: '28px 1fr auto', gap: 8, alignItems: 'center', fontSize: 14 }}>
             <Hidden p={p} keep={keep} />

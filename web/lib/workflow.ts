@@ -175,6 +175,10 @@ export function getProgress(studentId: number): StudentProgress | null {
   // Prerequisite review only applies when a requested class has a prerequisite (or it already ran).
   const needsPrereq = courses.some((c) => c.prerequisite) || (prog.has(8) && prog.get(8)!.status === 'complete');
   const young = isYoung(student);
+  // CCAP students cleared for the maximum units in a term skip Clear units for that term (classes added later included).
+  const maxCleared = new Map((d.prepare('SELECT term_id, cleared_by, cleared_at FROM unit_clearances WHERE student_id = ?').all(studentId) as
+    { term_id: number; cleared_by: number; cleared_at: string }[]).map((r) => [r.term_id, r]));
+  const unitsByMax = school.designation === 'CCAP' && courses.length > 0 && courses.every((c) => c.term_id && maxCleared.has(c.term_id));
   const regOpen = new Date(term.registration_opens).getTime() <= Date.now();
 
   const steps: StudentStep[] = [];
@@ -188,7 +192,9 @@ export function getProgress(studentId: number): StudentProgress | null {
     // High school approval is done only when every requested class (every term) is approved,
     // so adding classes later (e.g. next term) opens it again for just those classes.
     const hsDone = courses.length > 0 && courses.every((c) => c.hs_status === 'approved');
-    const isComplete = def.id === 4 ? hsDone : p?.status === 'complete';
+    const autoCleared = def.id === 7 && p?.status !== 'complete' && unitsByMax;
+    const isComplete = def.id === 4 ? hsDone : p?.status === 'complete' || autoCleared;
+    const maxAt = autoCleared ? courses.map((c) => maxCleared.get(c.term_id!)!.cleared_at).sort().at(-1)! : null;
     const hsAt = def.id === 4 && hsDone ? courses.map((c) => c.hs_at ?? '').sort().at(-1) || p?.completed_at || null : null;
     let status: StepStatus;
     if (isComplete) status = 'complete';
@@ -201,8 +207,8 @@ export function getProgress(studentId: number): StudentProgress | null {
     if (!isComplete && mode === 'required') blocked = true;
     steps.push({
       id: def.id, num: steps.length + 1, name: def.name, short: def.short, description: def.description,
-      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : p!.completed_at) : null,
-      data: isComplete && p?.data ? JSON.parse(p.data) : null,
+      mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : autoCleared ? maxAt : p!.completed_at) : null,
+      data: autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
       seen: !isComplete || !p || p.seen === 1,
     });
   }
@@ -225,6 +231,12 @@ export function getProgress(studentId: number): StudentProgress | null {
 export type YoungRec = { rec_by: number; rec: 'recommend' | 'not_recommend'; rec_note: string; rec_at: string };
 export function youngRecommendation(studentId: number): YoungRec | null {
   return (db().prepare('SELECT rec_by, rec, rec_note, rec_at FROM young_reviews WHERE student_id = ?').get(studentId) as YoungRec | undefined) ?? null;
+}
+
+/** Terms (names) a CCAP student was cleared for the maximum units in. Staff only. */
+export function maxUnitTerms(studentId: number): string[] {
+  return (db().prepare('SELECT t.name FROM unit_clearances c JOIN terms t ON t.id = c.term_id WHERE c.student_id = ? ORDER BY t.registration_opens')
+    .all(studentId) as { name: string }[]).map((r) => r.name);
 }
 
 export function completeStep(studentId: number, stepId: number, data: Record<string, unknown> | null, bySomeoneElse = false) {
@@ -271,6 +283,8 @@ export function reopenFrom(studentId: number, stepId: number) {
     const del = d.prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = ?');
     for (const id of later) del.run(studentId, id);
     if (later.includes(10)) d.prepare('DELETE FROM young_reviews WHERE student_id = ?').run(studentId);
+    // Moving Clear units back on purpose also drops any "cleared for maximum units" so it really reopens.
+    if (later.includes(7)) d.prepare('DELETE FROM unit_clearances WHERE student_id = ?').run(studentId);
   });
 }
 

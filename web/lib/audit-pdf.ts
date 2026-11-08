@@ -172,8 +172,8 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
     }
   }
   const cu = p.steps.find((s) => s.id === 7);
-  const ud = (cu?.data ?? {}) as { admin_id?: number; note?: string };
-  if (cu) w.text(cu.status === 'complete' ? `Clear units: cleared by ${fullName(person(ud.admin_id))}, Shasta College, on ${when(cu.completedAt)}.` : 'Clear units: not yet cleared.');
+  const ud = (cu?.data ?? {}) as { admin_id?: number; note?: string; max_units?: boolean };
+  if (cu) w.text(cu.status === 'complete' ? `Clear units: cleared by ${fullName(person(ud.admin_id))}, Shasta College, on ${when(cu.completedAt)}${ud.max_units ? ' (cleared for the maximum units for the term)' : ''}.` : 'Clear units: not yet cleared.');
   const pr = p.steps.find((s) => s.id === 8);
   const pd = (pr?.data ?? {}) as { admin_id?: number; decisions?: { code: string; decision: string }[] };
   if (pr) {
