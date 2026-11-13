@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { headers } from 'next/headers';
+import { siteOrigin } from '@/lib/site';
+import { demoMode, mailConfigured } from '@/lib/mail';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { addUser, retireGradClass, adminResetLink, setUserDisabled, unlockUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
+import { addUser, retireGradClass, adminResetLink, sendMeTestEmail, setUserDisabled, unlockUser, updateAdmin, updateStaffType } from '@/lib/admin-actions';
 import { lockedEmails, RESET_MINUTES } from '@/lib/security';
 import { retirableClasses } from '@/lib/retire';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -21,13 +22,16 @@ const ERRORS: Record<string, string> = {
   school: 'Pick a school.', exists: 'Someone already has that email.',
   self: "You can't remove your own super admin access.",
   self_disable: "You can't disable your own account.",
+  reset: "That account can't get a reset link (it isn't active).",
+  reset_nomail: "Email isn't set up yet, so a reset link can't be sent. Reset links only go to the email on file.",
+  reset_failed: "The reset email couldn't be sent. Check the email settings and try again.",
 };
 
 const STAFF_LABEL: Record<string, string> = { counselor: 'Counselor', admin: 'Admin', teacher: 'Teacher', other: 'Other' };
 
 type Row = { id: number; first_name: string; last_name: string; email: string; role: string; status: string; school: string | null; invite_token: string | null; admin_level: string | null; is_college_counselor: number; is_young_approver: number; is_young_lead: number; is_homeschool_lead: number; staff_type: string | null; disabled: number; retired_at: string | null };
 
-export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string; resetfor?: string; token?: string; unlocked?: string; retired?: string; rs?: string; rp?: string }> }) {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ role?: string; resetsent?: string; mailtest?: string; emailed?: string; q?: string; add?: string; error?: string; invited?: string; updated?: string; disabled?: string; enabled?: string; resetfor?: string; token?: string; unlocked?: string; retired?: string; rs?: string; rp?: string }> }) {
   const me = await requireAdmin('super');
   const sp = await searchParams;
   const role = ROLE_TABS.some(([r]) => r === sp.role) ? sp.role! : '';
@@ -46,8 +50,9 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const locked = lockedEmails();
   const retirable = retirableClasses();
   const resetFor = sp.resetfor ? (db().prepare('SELECT first_name, last_name, email FROM users WHERE id = ?').get(Number(sp.resetfor)) as { first_name: string; last_name: string; email: string } | undefined) : undefined;
-  const h = await headers();
-  const origin = `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
+  const origin = await siteOrigin();
+  const resetSent = sp.resetsent ? (db().prepare('SELECT first_name, last_name, email FROM users WHERE id = ?').get(Number(sp.resetsent)) as { first_name: string; last_name: string; email: string } | undefined) : undefined;
+  const mailOn = mailConfigured();
   const tabHref = (r: string) => '/admin/users' + (r || q ? '?' + new URLSearchParams({ ...(r ? { role: r } : {}), ...(q ? { q } : {}) }) : '');
 
   const schools = db().prepare('SELECT id, name, designation FROM schools ORDER BY name').all() as { id: number; name: string; designation: string }[];
@@ -65,18 +70,31 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
       <Flash error msg={!sp.add && sp.error ? ERRORS[sp.error] : null} />
       {resetFor && sp.token && (
         <div className="flash pad-sm" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span><strong>Password reset link for {resetFor.first_name} {resetFor.last_name}.</strong> Send it to {resetFor.email}. It works once and expires in {RESET_MINUTES} minutes:</span>
+          <span><strong>Test mode: password reset link for {resetFor.first_name} {resetFor.last_name}.</strong> Email isn&apos;t set up, so it&apos;s shown here for testing. On the live site it is only emailed to {resetFor.email}. It works once and expires in {RESET_MINUTES} minutes:</span>
           <code style={{ wordBreak: 'break-all', fontSize: 13 }}>{origin}/reset/{sp.token}</code>
         </div>
       )}
+      <Flash msg={resetSent ? `Reset link emailed to ${resetSent.first_name} ${resetSent.last_name} at ${resetSent.email} (the email on file). It works once and expires in ${RESET_MINUTES} minutes.` : null} />
+      <Flash msg={sp.mailtest === 'ok' ? `Test email sent to ${me.email}. Check your inbox.` : null} />
+      <Flash error msg={sp.mailtest === 'failed' ? 'The test email couldn’t be sent. Check RESEND_API_KEY and MAIL_FROM, and that the sending domain is verified.' : sp.mailtest === 'off' ? 'Email isn’t set up yet.' : null} />
       <Flash msg={sp.unlocked ? 'Account unlocked. They can try signing in again.' : null} />
       <Flash msg={sp.retired ? `Retired the class of ${sp.retired}: ${sp.rs} student account${sp.rs === '1' ? '' : 's'} and ${sp.rp} parent account${sp.rp === '1' ? '' : 's'}. Their records are kept; use Enable to restore one.` : null} />
       {invited && (
         <div className="flash pad-sm" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span><strong>Invite created for {invited.first_name}.</strong> Send this link to {invited.email} so they can set a password:</span>
+          <span><strong>Invite created for {invited.first_name}.</strong> {sp.emailed ? `We emailed it to ${invited.email}. You can also send this link yourself:` : `Send this link to ${invited.email} so they can set a password:`}</span>
           <code style={{ wordBreak: 'break-all', fontSize: 13 }}>{origin}/invite/{invited.invite_token}</code>
         </div>
       )}
+      <form action={sendMeTestEmail} data-mail-status className="pad-sm" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '12px 40px', fontSize: 14, borderBottom: '2px solid var(--color-divider)', background: mailOn ? undefined : '#fff4e0' }}>
+        {mailOn ? (
+          <>
+            <span><strong>Email is connected.</strong> Reset links, invites and notices are sent from {process.env.MAIL_FROM}. Links point to {origin}.</span>
+            <button className="btn btn-secondary" style={{ fontSize: 13, padding: '4px 10px' }}>Send me a test email</button>
+          </>
+        ) : (
+          <span><strong>Email isn&apos;t set up yet.</strong> Nothing is emailed{demoMode() ? '; in test mode, links are shown on screen instead' : ', and reset links can’t be sent'}. To connect it, set RESEND_API_KEY, MAIL_FROM and SITE_URL where the site is hosted.</span>
+        )}
+      </form>
       <div className="pad-sm" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 40px', gap: 12, flexWrap: 'wrap' }}>
         <div className="seg">
           {ROLE_TABS.map(([r, label]) => (
@@ -164,7 +182,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                     {u.status === 'active' && !u.disabled && (
                       <form action={adminResetLink}>
                         <input type="hidden" name="id" value={u.id} />
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 4px', color: 'var(--color-accent-700)' }}>Reset link</button>
+                        <button className="btn btn-ghost" title={`Emails a one-time reset link to ${u.email} (the email on file)`} style={{ fontSize: 12, padding: '2px 4px', color: 'var(--color-accent-700)' }}>{mailOn ? 'Email reset link' : 'Reset link'}</button>
                       </form>
                     )}
                     {u.id !== me.id && (

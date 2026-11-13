@@ -15,6 +15,7 @@ import { actorOf, logEvent } from './audit';
 import { addTranscript, readUpload, releaseHolds } from './transcripts';
 import { courseName } from './workflow';
 import { notifyUsers } from './notify';
+import { sendInvite } from './account-mail';
 
 
 async function stepFor(stepId: number, allowed: string[]) {
@@ -196,6 +197,7 @@ export async function inviteParent(formData: FormData) {
     db().prepare('INSERT OR IGNORE INTO parent_links (parent_id, student_id) VALUES (?,?)').run(id, me.id);
     return id;
   });
+  if (!existing) await sendInvite(parentId, `${me.first_name} ${me.last_name}`);
   redirect(`/student/steps/3?invited=${parentId}`);
 }
 

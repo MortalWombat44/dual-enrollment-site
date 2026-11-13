@@ -15,3 +15,10 @@ services:
         value: "22"
       - key: SHOW_DEMO_ACCOUNTS
         value: "1"
+      # Email (see web/README.md, "Connecting email"). Fill these in on Render; they are not stored in the code.
+      - key: SITE_URL          # the site's public address, e.g. https://de.shastacollege.edu (used for links in emails)
+        sync: false
+      - key: RESEND_API_KEY    # from resend.com
+        sync: false
+      - key: MAIL_FROM         # e.g. Shasta College Dual Enrollment <de@yourdomain.edu> (the domain must be verified in Resend)
+        sync: false

@@ -1,14 +1,10 @@
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { schoolRoster } from '@/lib/roster';
+import { csvCell as cell } from '@/lib/csv';
 
 export const dynamic = 'force-dynamic';
 
-const cell = (v: unknown) => {
-  const s = String(v ?? '');
-  // Quote everything and neutralise spreadsheet formulas.
-  return `"${(/^[=+\-@]/.test(s) ? "'" + s : s).replace(/"/g, '""')}"`;
-};
 
 export async function GET(req: Request) {
   const me = await currentUser();

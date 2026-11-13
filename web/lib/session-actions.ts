@@ -7,9 +7,9 @@ import { resolveSchool, type SchoolChoice } from './schools';
 import { parseProfile, type ProfileInput } from './profile';
 import { notifyLeads } from './notify';
 import { hashPassword, verifyPassword } from './password';
-import { clearFailures, createResetToken, lockedMinutes, MAX_RESETS_PER_HOUR, recentResets, recordFailure, resetTokenUser, RESET_MINUTES, useResetTokens } from './security';
-import { demoMode, sendMail } from './mail';
-import { headers } from 'next/headers';
+import { clearFailures, lockedMinutes, MAX_RESETS_PER_HOUR, recentResets, recordFailure, resetTokenUser, useResetTokens } from './security';
+import { demoMode } from './mail';
+import { sendResetLink } from './account-mail';
 
 export async function login(formData: FormData) {
   const email = String(formData.get('email') || '').trim();
@@ -75,8 +75,6 @@ export async function signUp(formData: FormData) {
   if (!first || !last) fail('name');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('email');
   if (password.length < 8 || password !== confirm) fail('password');
-  const school = resolveSchool(formData);
-  if ('error' in school) fail(school.error);
   const profile = parseProfile(formData, grade === 12);
   if ('error' in profile) fail(profile.error);
   if (num && !/^[A-Za-z0-9-]+$/.test(num)) fail('id');
@@ -84,6 +82,9 @@ export async function signUp(formData: FormData) {
   if (!Number.isInteger(gradYear) || gradYear < thisClass || gradYear > thisClass + 12) fail('grad');
   if (!GRADES.includes(grade)) fail('grade');
   if (db().prepare('SELECT 1 FROM users WHERE email = ?').get(email)) fail('exists');
+  // Last, so a typed-in ("Other") school is only added when the sign-up is going through.
+  const school = resolveSchool(formData);
+  if ('error' in school) fail(school.error);
   const sc = school as SchoolChoice, pr = profile as ProfileInput;
   const schoolId = sc.schoolId;
   const id = tx(() => {
@@ -108,12 +109,11 @@ export async function signUp(formData: FormData) {
   redirect('/student');
 }
 
-async function origin() {
-  const h = await headers();
-  return `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
-}
-
-/** Forgot password: email a one-time link. Always answers the same way, so it never reveals which emails have accounts. */
+/**
+ * Forgot password: email a one-time link to the address on file. The typed email is only used to find the account;
+ * the link is sent to the address stored on that account. Always answers the same way, so it never reveals which
+ * emails have accounts.
+ */
 export async function requestPasswordReset(formData: FormData) {
   const email = String(formData.get('email') || '').trim().toLowerCase().slice(0, 200);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) redirect('/forgot?error=email');
@@ -121,16 +121,8 @@ export async function requestPasswordReset(formData: FormData) {
     | { id: number; first_name: string } | undefined;
   let demoLink = '';
   if (u && recentResets(u.id) < MAX_RESETS_PER_HOUR) {
-    const link = `${await origin()}/reset/${createResetToken(u.id)}`;
-    const sent = await sendMail({
-      to: email,
-      subject: 'Reset your Shasta College Dual Enrollment password',
-      text: `Hi ${u.first_name},\n\nUse this link to set a new password. It works once and expires in ${RESET_MINUTES} minutes:\n\n${link}\n\nIf you didn't ask for this, you can ignore this email.`,
-    });
-    if (!sent) {
-      console.log(`[password reset] email not configured; link for ${email}: ${link}`);
-      if (demoMode()) demoLink = link;
-    }
+    const r = await sendResetLink(u.id);
+    if (r && !r.emailed && demoMode()) demoLink = r.link;
   }
   redirect('/forgot?sent=1' + (demoLink ? `&demo=${encodeURIComponent(demoLink)}` : ''));
 }

@@ -373,15 +373,22 @@ export function db(): Db {
     _db = conn;
   }
   const conn = _db;
+  // Prepared statements are kept and reused: the same queries run thousands of times (once per student on staff pages).
+  const cache = new Map<string, Stmt>();
   _wrapped = {
     exec: (sql) => conn.exec(sql),
     prepare(sql) {
+      const hit = cache.get(sql);
+      if (hit) return hit;
       const s = conn.prepare(sql);
-      return {
+      const st: Stmt = {
         get: (...p) => plain(s.get(...p)),
         all: (...p) => s.all(...p).map(plain),
         run: (...p) => s.run(...p),
       };
+      if (cache.size > 1000) cache.clear(); // queries with long "IN (?, ?, …)" lists come in many shapes
+      cache.set(sql, st);
+      return st;
     },
   };
   return _wrapped;

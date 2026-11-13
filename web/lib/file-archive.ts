@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Zip, ZipPassThrough, ZipDeflate } from 'fflate';
 import { db, UPLOAD_DIR, tx } from './db';
 import { buildAuditPdf } from './audit-pdf';
+import { csvCell } from './csv';
 
 /**
  * Student files by graduating class: export as a ZIP, then delete (10 minutes later, cancellable).
@@ -59,7 +60,6 @@ export function classSummaries(): ClassSummary[] {
 }
 
 const safe = (s: string) => s.replace(/[^\w.\- ]+/g, '_').trim() || 'file';
-const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 const KIND: Record<string, string> = {
   signature: 'Parent signature', consent_upload: 'Uploaded consent form', hs_signature: 'High school approval signature',
   young_transcript: 'Transcript / report card', transcript: 'Transcript (prerequisite review)', young_letter: "Principal's letter", affidavit: 'Private School Affidavit',
@@ -74,7 +74,8 @@ export function exportClassZip(year: number, by: { id: number; name: string }): 
   const files = filesFor(year);
   const byStudent = new Map<number, FileRow[]>();
   for (const f of files) byStudent.set(f.student_id, [...(byStudent.get(f.student_id) ?? []), f]);
-  db().prepare('INSERT INTO file_exports (grad_year, exported_by, exported_at, file_count) VALUES (?,?,?,?)').run(year, by.id, new Date().toISOString(), files.length);
+  // The export is only recorded (which unlocks "Delete files") once the whole ZIP has been built without an error.
+  const startedAt = new Date().toISOString();
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -106,6 +107,7 @@ export function exportClassZip(year: number, by: { id: number; name: string }): 
       }
       add('index.csv', new TextEncoder().encode('﻿' + index.join('\r\n') + '\r\n'), true);
       zip.end();
+      db().prepare('INSERT INTO file_exports (grad_year, exported_by, exported_at, file_count) VALUES (?,?,?,?)').run(year, by.id, startedAt, files.length);
     },
   });
 }

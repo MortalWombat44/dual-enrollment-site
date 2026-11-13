@@ -19,6 +19,8 @@ export type User = {
   grade_confirmed_year: number | null;
   signature_file_id: number | null;
   retired_at: string | null;
+  /** 1 = access switched off (also set when retired). Only present on rows loaded with SELECT *. */
+  disabled?: number;
   student_number: string | null;
   counselor_id: number | null;
   admin_level: 'college' | 'super' | null;

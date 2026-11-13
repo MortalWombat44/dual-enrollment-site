@@ -1,6 +1,6 @@
 import 'server-only';
-import { db, stepIndex } from './db';
-import { getProgress } from './workflow';
+import { db, stepIndex, STEP_ORDER } from './db';
+import { getProgressMany } from './workflow';
 
 /** One Clear units step (7): when it became ready for the college, and when (and by whom) it was cleared. */
 export type ClearRecord = { studentId: number; student: string; schoolId: number; adminId: number | null; readyAt: string | null; clearedAt: string | null };
@@ -11,11 +11,13 @@ export type ClearRecord = { studentId: number; student: string; schoolId: number
  */
 export function clearUnitsRecords(): ClearRecord[] {
   const d = db();
-  const before = [1, 2, 3, 4].filter((id) => stepIndex(id) < stepIndex(7));
+  // Every step that comes before College review (including young student steps), plus the homeschool affidavit's review.
+  const before = STEP_ORDER.filter((id) => stepIndex(id) < stepIndex(7));
   const rows = d.prepare(`
     SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.school_id,
       p7.status AS s7, p7.completed_at AS cleared_at, p7.data AS d7,
-      (SELECT MAX(completed_at) FROM step_progress p WHERE p.student_id = u.id AND p.status = 'complete' AND p.step_id IN (${before.join(',')})) AS ready_at
+      NULLIF(MAX(COALESCE((SELECT MAX(completed_at) FROM step_progress p WHERE p.student_id = u.id AND p.status = 'complete' AND p.step_id IN (${before.join(',')})), ''),
+          COALESCE((SELECT MAX(reviewed_at) FROM affidavits a WHERE a.student_id = u.id AND a.status = 'approved'), '')), '') AS ready_at
     FROM users u LEFT JOIN step_progress p7 ON p7.student_id = u.id AND p7.step_id = 7
     WHERE u.role = 'student'`).all() as {
       id: number; name: string; school_id: number; s7: string | null; cleared_at: string | null; d7: string | null; ready_at: string | null;
@@ -32,12 +34,11 @@ export function clearUnitsRecords(): ClearRecord[] {
 
 /** Students currently sitting in the Clear units queue, with how long they've waited so far. */
 export function waitingNow(): { schoolId: number; readyAt: string }[] {
-  const ids = (db().prepare("SELECT id FROM users WHERE role = 'student'").all() as { id: number }[]).map((r) => r.id);
+  const ids = (db().prepare("SELECT id FROM users WHERE role = 'student' AND disabled = 0").all() as { id: number }[]).map((r) => r.id);
   const out: { schoolId: number; readyAt: string }[] = [];
-  for (const id of ids) {
-    const p = getProgress(id);
-    const s7 = p?.steps.find((s) => s.id === 7);
-    if (!p || s7?.status !== 'in_review') continue;
+  for (const p of getProgressMany(ids).values()) {
+    const s7 = p.steps.find((s) => s.id === 7);
+    if (s7?.status !== 'in_review') continue;
     const prev = p.steps[p.steps.indexOf(s7) - 1];
     if (prev?.completedAt) out.push({ schoolId: p.school.id, readyAt: prev.completedAt });
   }

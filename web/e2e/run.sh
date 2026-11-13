@@ -13,13 +13,14 @@ mkdir -p $E2E/shots
 fresh() {
   pkill -f "next start -p 3100" 2>/dev/null || true; pkill -f next-server 2>/dev/null || true; sleep 1
   rm -rf data
-  (SHOW_DEMO_ACCOUNTS=1 npx next start -p 3100 > $E2E/server.log 2>&1 &)
+  # A test can need extra settings (e.g. e2e28.env connects a stand-in mail server): "$1" is that file, if any.
+  (env $([ -n "$1" ] && [ -f "$1" ] && cat "$1") SHOW_DEMO_ACCOUNTS=1 npx next start -p 3100 > $E2E/server.log 2>&1 &)
   for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:3100/login && return; sleep 1; done
   echo "server did not start"; tail -20 $E2E/server.log; exit 1
 }
 run() { # each test gets a fresh database; files a test writes (like signed-form.pdf) stay
   for t in "$@"; do
-    fresh; echo "=== e2e$t"
+    fresh "$E2E/e2e$t.env"; echo "=== e2e$t"
     node $E2E/e2e$t.js || { echo "FAILED: e2e$t.js (server log: $E2E/server.log)"; exit 1; }
   done
 }
@@ -27,7 +28,7 @@ run() { # each test gets a fresh database; files a test writes (like signed-form
 if [ $# -gt 0 ]; then run "$@"
 else
   # Order matters: e2e13 writes signed-form.pdf, which 15, 17, 21 and 22 use.
-  run 2 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
+  run 2 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28
 fi
 pkill -f next-server 2>/dev/null || true
 echo "ALL E2E TESTS PASSED"

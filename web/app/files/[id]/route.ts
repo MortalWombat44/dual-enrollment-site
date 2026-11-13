@@ -10,6 +10,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const f = getFile(Number((await params).id));
   // Uploaders keep access to their own files (a parent's signature or signed form).
   if (!f || !(canSeeStudent(me, f.student_id) || f.uploaded_by === me.id)) return new Response('Not found', { status: 404 });
+  // Staff signatures (high school approval) are for staff and the audit record: students and parents don't see staff names.
+  if ((f.kind === 'hs_signature' || f.kind === 'staff_signature') && (me.role === 'student' || me.role === 'parent') && f.uploaded_by !== me.id) return new Response('Not found', { status: 404 });
   return new Response(new Uint8Array(readFile(f)), {
     headers: {
       'Content-Type': f.mime,

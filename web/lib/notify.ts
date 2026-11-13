@@ -1,7 +1,7 @@
 import 'server-only';
 import { db } from './db';
 import { mailConfigured, sendMail } from './mail';
-import { siteOrigin } from './approver-links';
+import { siteOrigin } from './site';
 
 export type NoticeKind = 'young' | 'homeschool' | 'help' | 'nudge' | 'prereq' | 'transcript';
 const ACTIVE_ADMIN = "role = 'admin' AND disabled = 0 AND status = 'active'";

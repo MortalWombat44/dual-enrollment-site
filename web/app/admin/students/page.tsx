@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { HOLD_LABEL, stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { HOLD_LABEL, stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openIdChangeIds, openSchoolChange, openSchoolChangeIds, getProgressMany, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
   adminAddCourse, adminCompleteStep, adminUploadTranscript, releasePrereqHold, adminFlagPrereq, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
@@ -21,8 +21,9 @@ import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
 export const dynamic = 'force-dynamic';
 
 type Tab = 'help' | 'overdue' | 'units' | 'prereq' | 'prereqwait' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
-type SP = { link?: string; emailed?: string; classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
+type SP = { page?: string; link?: string; emailed?: string; classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
+const PAGE_SIZE = 200;
 const DONE: Record<string, string> = {
   cleared: 'Verified and units cleared. The student moves to the next step.',
   sent_back: 'Sent back. The student will see your note on Course selection.',
@@ -46,7 +47,7 @@ const DONE: Record<string, string> = {
   young_declined: 'Declined. The student sees your note on Course selection.',
   course_removed: 'Class removed from the request.',
   moved_school: 'Student moved to the new school.',
-  course_term: 'Class moved to the new term.',
+  course_term: 'Class moved to the new term. It needs high school approval and any prerequisite review again for that term.',
   school_change_approved: 'Moved to the requested school.',
   school_change_declined: 'School change request declined.',
   id_saved: 'Shasta College ID saved.',
@@ -60,6 +61,7 @@ const ERR: Record<string, string> = {
   tr_file: TRANSCRIPT_ERRORS.file, tr_size: TRANSCRIPT_ERRORS.size, tr_type: TRANSCRIPT_ERRORS.type,
   verify: 'Check Program in SACP, Start date in RGPE and Cohort in STAL before clearing.',
   no_approver: 'This student has no high school approver email on file.',
+  term_taken: 'That class is already requested for that term, so it wasn’t moved.',
   ce: 'A concurrent class needs a course code (like PSYC C1000) and units.',
   note: 'Add a note so the student knows what to change.',
   decide: 'Approve or decline every class with a prerequisite.',
@@ -89,10 +91,13 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     .all(...schoolArgs) as { id: number }[]).map((r) => r.id);
   // A student is "in" a term if any of their classes is, or (no classes yet) it's their default term.
   const inTerm = (p: StudentProgress) => !termId || p.requestTerms.some((t) => t.id === termId) || (p.courses.length === 0 && p.term.id === termId);
-  const all = ids.map(getProgress).filter((p): p is StudentProgress => !!p && inTerm(p));
+  const everyone = [...getProgressMany(ids).values()].filter(inTerm);
+  // Retired (graduated) and disabled accounts stay out of the work queues; they're still under All students.
+  const all = everyone.filter((p) => !p.student.disabled);
   const waitingOn = (p: StudentProgress, id: number) => p.steps.find((s) => s.id === id)?.status === 'in_review';
   const shared = sharedStudentIds();
   const helpOpen = openHelpStudentIds();
+  const schoolChanges = openSchoolChangeIds(), idChanges = openIdChangeIds();
   const groups: Record<Tab, StudentProgress[]> = {
     units: all.filter((p) => waitingOn(p, 7)),
     // Prerequisites: the counselor's queue. Classes all on hold wait on the student instead.
@@ -102,10 +107,10 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     homeschool: all.filter((p) => waitingOn(p, 11)),
     help: all.filter((p) => helpOpen.has(p.student.id)),
     overdue: all.filter((p) => !!p.steps.find((s) => s.id === 5)?.overdue),
-    school: all.filter((p) => !!openSchoolChange(p.student.id)),
-    idreq: all.filter((p) => !!openIdChange(p.student.id)),
+    school: all.filter((p) => schoolChanges.has(p.student.id)),
+    idreq: all.filter((p) => idChanges.has(p.student.id)),
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
-    all,
+    all: everyone,
   };
   const tab: Tab = (['help', 'overdue', 'prereq', 'prereqwait', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
@@ -115,26 +120,31 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   // Nudged prerequisite reviews go to the very top of the Prerequisites queue.
   const nudges = openNudges();
   const nudged = (p: StudentProgress) => tab === 'prereq' && nudges.has(p.student.id);
-  const rows = groups[tab]
+  const allRows = groups[tab]
     .filter((p) => !q || `${p.student.first_name} ${p.student.last_name} ${p.student.student_number ?? ''}`.toLowerCase().includes(q))
     .sort((a, b) => tab === 'ids'
       // Shared IDs: keep accounts with the same ID next to each other.
       ? (a.student.student_number ?? '').localeCompare(b.student.student_number ?? '') || a.student.last_name.localeCompare(b.student.last_name)
       : Number(nudged(b)) - Number(nudged(a)) || Number(isMine(b)) - Number(isMine(a)));
-  const mineCount = rows.filter(isMine).length;
+  const mineCount = allRows.filter(isMine).length;
+  // Long lists are shown a page at a time.
+  const pages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const page = Math.min(pages, Math.max(1, Number(sp.page) || 1));
+  const rows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const sel = (sp.student && getProgress(Number(sp.student))) || rows[0] || null;
   const waitingParent = all.filter((p) => p.steps.find((s) => s.id === 3)?.status === 'waiting_parent').length;
   const waitingSince = (p: StudentProgress) => {
     const i = p.next ? p.steps.indexOf(p.next) : -1;
     return i > 0 ? p.steps[i - 1].completedAt : null;
   };
-  const href = (o: Partial<{ tab: Tab; student: number }>) => {
+  const href = (o: Partial<{ tab: Tab; student: number; page: number }>) => {
     const u = new URLSearchParams();
     const t = o.tab ?? tab; if (t !== 'units') u.set('tab', t);
     if (mine) u.set('school', 'mine'); else if (schoolId) u.set('school', String(schoolId));
     if (termId) u.set('term', String(termId));
     if (sp.q) u.set('q', sp.q);
     if (o.student) u.set('student', String(o.student));
+    const pg = o.page ?? (o.tab && o.tab !== tab ? 1 : page); if (pg > 1) u.set('page', String(pg));
     const s = u.toString();
     return '/admin/students' + (s ? '?' + s : '');
   };
@@ -221,7 +231,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                     ...(lastOfId ? { backgroundImage: `${firstOfId ? 'linear-gradient(#b3261e, #b3261e), ' : ''}linear-gradient(#b3261e, #b3261e)`, backgroundSize: firstOfId ? '14px 3px, 14px 3px' : '14px 3px', backgroundRepeat: 'no-repeat', backgroundPosition: firstOfId ? 'left top, left bottom' : 'left bottom' } : {}),
                   } : undefined;
                   if (tab === 'ids') {
-                    return [firstOfId ? <tr key={`g${sid}`}><td colSpan={5} className="kicker-sm" style={{ paddingTop: i === 0 ? 8 : 18, color: '#b3261e' }}>Shasta College ID {sid} · {rows.filter((x) => x.student.student_number === sid).length} accounts</td></tr> : null,
+                    return [firstOfId ? <tr key={`g${sid}`}><td colSpan={5} className="kicker-sm" style={{ paddingTop: i === 0 ? 8 : 18, color: '#b3261e' }}>Shasta College ID {sid} · {allRows.filter((x) => x.student.student_number === sid).length} accounts</td></tr> : null,
                       <tr key={p.student.id} data-shared-id={sid} className={sel?.student.id === p.student.id ? 'sel' : undefined}>
                         <td style={bracket}><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong></Link></td>
                         <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
@@ -231,8 +241,8 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                       </tr>];
                   }
                   const header = primary.size > 0 && !nudged(p) && (i === 0 || isMine(rows[i - 1]) !== isMine(p) || nudged(rows[i - 1]))
-                    ? <tr key={`h${i}`}><td colSpan={5} className="kicker-sm" style={{ paddingTop: i === 0 ? 8 : 20, color: isMine(p) ? 'var(--color-accent-700)' : 'var(--ink-60)' }}>{isMine(p) ? `Your schools · ${mineCount}` : `Other schools · ${rows.length - mineCount}`}</td></tr>
-                    : nudged(p) && i === 0 ? <tr key="hn"><td colSpan={5} className="kicker-sm" style={{ paddingTop: 8, color: '#b3261e' }}>Nudged · prioritize · {rows.filter(nudged).length}</td></tr>
+                    ? <tr key={`h${i}`}><td colSpan={5} className="kicker-sm" style={{ paddingTop: i === 0 ? 8 : 20, color: isMine(p) ? 'var(--color-accent-700)' : 'var(--ink-60)' }}>{isMine(p) ? `Your schools · ${mineCount}` : `Other schools · ${allRows.length - mineCount}`}</td></tr>
+                    : nudged(p) && i === 0 ? <tr key="hn"><td colSpan={5} className="kicker-sm" style={{ paddingTop: 8, color: '#b3261e' }}>Nudged · prioritize · {allRows.filter(nudged).length}</td></tr>
                     : null;
                   return [header,
                     <tr key={p.student.id} data-nudged={nudged(p) ? '1' : undefined} className={sel?.student.id === p.student.id ? 'sel' : undefined}
@@ -240,6 +250,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                       <td><Link className="rowa" href={link}><strong>{p.student.first_name} {p.student.last_name}</strong>
                         {nudged(p) && <span className="tag" style={{ marginLeft: 6, background: '#b3261e', color: '#fff' }} title={`Nudged by ${nudges.get(p.student.id)!.by_name ?? 'an admin'}`}>Nudged</span>}
                         {isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}
+                        {!!p.student.disabled && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>{p.student.retired_at ? 'Retired' : 'Disabled'}</span>}
                         {p.student.student_number && shared.has(p.student.student_number) && <span className="tag" style={{ marginLeft: 6, background: '#fdecea', color: '#6b1a12' }}>Shared ID</span>}
                       </Link></td>
                       <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
@@ -253,6 +264,14 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
               </tbody>
             </table>
           </div>
+          {pages > 1 && (
+            <div data-pager style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 14, fontSize: 14 }}>
+              {page > 1 ? <Link href={href({ page: page - 1 })}>← Previous</Link> : <span className="ink60">← Previous</span>}
+              <span>Page {page} of {pages} · {allRows.length} students</span>
+              {page < pages ? <Link href={href({ page: page + 1 })}>Next →</Link> : <span className="ink60">Next →</span>}
+              <span className="ink60">Search by name or ID to find someone faster.</span>
+            </div>
+          )}
         </div>
         {sel ? <Panel p={sel} me={me} schools={schools} terms={terms} keep={keep} sharedWith={(sel.student.student_number && shared.get(sel.student.student_number)?.filter((x) => x.id !== sel.student.id)) || []} /> : <div className="pad-sm ink60" style={{ padding: '28px 32px', fontSize: 14 }}>Pick a student to see their record.</div>}
       </div>
@@ -376,7 +395,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div className="pad-sm" style={{ padding: '24px 32px', borderBottom: '2px solid var(--color-divider)' }}>
         <div className="kicker accent700">{p.next ? `Step ${stepOnLabel(p).replace(' ', ' · ')}` : 'All steps done'}</div>
-        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}{isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}</div>
+        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{p.student.first_name} {p.student.last_name}{isYoung(p.student) && <span className="tag" style={{ marginLeft: 6, background: '#e8f0fb', color: '#1d3f6e' }} title="8th grade or below">Young student</span>}{!!p.student.disabled && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>{p.student.retired_at ? 'Retired' : 'Disabled'}</span>}</div>
         <div style={{ fontSize: 14, marginTop: 2 }}>{p.termLabel} · {p.school.name} · {classLabel(p.student)} · ID {p.student.student_number ?? '—'}</div>
         <StudentContact s={p.student} approver />
       </div>

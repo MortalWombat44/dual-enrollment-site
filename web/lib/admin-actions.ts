@@ -1,7 +1,9 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { requireAdmin } from './auth';
-import { clearFailures, createResetToken } from './security';
+import { clearFailures } from './security';
+import { sendInvite, sendResetLink, sendTestEmail } from './account-mail';
+import { demoMode, mailConfigured } from './mail';
 import { dismissRetireNudge, retireClass, retirableClasses } from './retire';
 import { cryptoToken, db, DEFAULT_MODES, STEP_DEFS, tx } from './db';
 import { archiveClosedTerm, currentTerm, fromPacificInput } from './workflow';
@@ -53,7 +55,8 @@ export async function addUser(formData: FormData) {
     }
     return uid;
   });
-  redirect(`/admin/users?invited=${id}`);
+  const emailed = await sendInvite(id);
+  redirect(`/admin/users?invited=${id}${emailed ? '&emailed=1' : ''}`);
 }
 
 export async function addSchool(formData: FormData) {
@@ -179,14 +182,29 @@ export async function setUserDisabled(formData: FormData) {
 
 
 
-/** Super admin: make a one-time password reset link to send someone yourself (works without email set up). */
+/**
+ * Super admin: send someone a one-time password reset link. It goes ONLY to the email address on file for that
+ * account; the admin never sees or forwards it. Until email is set up, demo mode shows the link on screen for
+ * testing; a live site without email refuses instead.
+ */
 export async function adminResetLink(formData: FormData) {
   await requireAdmin('super');
   const id = Number(formData.get('id'));
   const u = db().prepare("SELECT id FROM users WHERE id = ? AND status = 'active' AND disabled = 0").get(id);
   if (!u) redirect('/admin/users?error=reset');
-  const token = createResetToken(id);
-  redirect(`/admin/users?resetfor=${id}&token=${encodeURIComponent(token)}`);
+  if (!mailConfigured() && !demoMode()) redirect('/admin/users?error=reset_nomail');
+  const r = await sendResetLink(id);
+  if (!r) redirect('/admin/users?error=reset');
+  if (r!.emailed) redirect(`/admin/users?resetsent=${id}`);
+  if (!demoMode()) redirect('/admin/users?error=reset_failed');
+  redirect(`/admin/users?resetfor=${id}&token=${encodeURIComponent(r!.link.split('/reset/')[1])}`);
+}
+
+/** Super admin: send yourself a test email to check that email is connected. */
+export async function sendMeTestEmail() {
+  const me = await requireAdmin('super');
+  const ok = mailConfigured() && await sendTestEmail(me.email);
+  redirect(`/admin/users?mailtest=${ok ? 'ok' : mailConfigured() ? 'failed' : 'off'}`);
 }
 
 /** Super admin: lift a lockout early. */

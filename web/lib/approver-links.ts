@@ -1,18 +1,13 @@
 import 'server-only';
 import crypto from 'node:crypto';
-import { headers } from 'next/headers';
 import { db } from './db';
 import { sendMail } from './mail';
 import { getProgress } from './workflow';
+import { siteOrigin } from './site';
 
 /** Links for outside high school approvers (students at an unlisted school). Only a hash of the token is stored. */
 const DAYS = 90;
 const hash = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
-
-export async function siteOrigin() {
-  const h = await headers();
-  return `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
-}
 
 /** A new link for the student's named approver (older links stop working). */
 export function createApproverLink(studentId: number): string | null {

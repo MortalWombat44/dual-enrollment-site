@@ -44,7 +44,7 @@ body.append('''
 <tr><td><strong>Super Admin</strong></td><td>Everything a College Admin does, plus users, schools, courses, terms, audits and student file retention.</td></tr>
 </tbody></table>
 ''')
-body.append(callout('info', 'Signing in', 'Use your Shasta College email and password. After 5 wrong passwords in 15 minutes the account locks for 15 minutes; a Super Admin can unlock it from <em>Users</em>. Use <em>Forgot password</em> on the sign-in page for a one-time reset link (valid for 60 minutes). Sessions last 14 days on a device.'))
+body.append(callout('info', 'Signing in', 'Use your Shasta College email and password. After 5 wrong passwords in 15 minutes the account locks for 15 minutes; a Super Admin can unlock it from <em>Users</em>. Use <em>Forgot password</em> on the sign-in page for a one-time reset link (valid for 60 minutes). Sessions last 14 days on a device. Reset links are only ever sent to the email address on file for the account.'))
 body.append('</section>')
 
 # ---------------------------------------------------------------- 2
@@ -75,7 +75,7 @@ body.append('''
 <tr><td><strong>Young students</strong> <span class="pill">when waiting</span></td><td>Students in 8th grade and below waiting for a recommendation or decision.</td></tr>
 <tr><td><strong>Homeschool</strong> <span class="pill">when waiting</span></td><td>Private School Affidavits waiting for review.</td></tr>
 <tr><td><strong>School changes · ID changes · Shared IDs</strong></td><td>Requests to change a student&rsquo;s high school or Shasta College ID, and IDs that appear on more than one account.</td></tr>
-<tr><td><strong>All students</strong></td><td>Everyone, for lookups and corrections.</td></tr>
+<tr><td><strong>All students</strong></td><td>Everyone, for lookups and corrections, 200 per page. Retired and disabled students appear only here (labelled), not in the work queues.</td></tr>
 </tbody></table>
 </section>''')
 
@@ -199,7 +199,7 @@ body.append('''<p>Click any student to open their panel. From top to bottom it s
 <tr><td><strong>Review sections</strong></td><td>Any review waiting on you: College review, prerequisites, young student review, affidavit, help requests.</td></tr>
 <tr><td><strong>Archived requests</strong></td><td>Classes archived because registration for their term was turned off before the student registered (see chapter 9).</td></tr>
 <tr><td><strong>Steps</strong></td><td>Every step with its status, and <em>Mark complete</em> or <em>Move back</em>.</td></tr>
-<tr><td><strong>Classes requested</strong></td><td>Move a class to another term, remove it, request a Dual Enrollment class, or type in a Concurrent class for the student.</td></tr>
+<tr><td><strong>Classes requested</strong></td><td>Move a class to another term (it then needs high school approval and any prerequisite review again for that term), remove it, request a Dual Enrollment class, or type in a Concurrent class for the student.</td></tr>
 <tr><td><strong>Grade, school, ID, documents</strong></td><td>Correct grade, graduation year, school or Shasta College ID; open the parent consent and audit record.</td></tr>
 <tr><td><strong>History</strong></td><td>Who did what and when, grouped by term: who requested each class, high school approvals, prerequisite decisions and holds, College review, steps moved forward or back, transcripts and uploads. Things not tied to a term (consent, CCCApply, ID changes) are under <em>All terms</em>. The audit PDF includes the same history.</td></tr>
 </tbody></table>
@@ -284,7 +284,7 @@ body.append('''
 <table>
 <thead><tr><th style="width:24%">Page</th><th>What you can do</th></tr></thead>
 <tbody>
-<tr><td><strong>Users</strong></td><td>Add users and admins; set admin level, designations and primary schools; disable accounts; make a password reset link; unlock locked accounts; set High School Staff type. Each June you are reminded to <strong>retire</strong> the class that graduated four years ago.</td></tr>
+<tr><td><strong>Users</strong></td><td>Add users and admins; set admin level, designations and primary schools; disable accounts; email a password reset link to the address on file (you never see the link); unlock locked accounts; set High School Staff type. Each June you are reminded to <strong>retire</strong> the class that graduated four years ago.</td></tr>
 <tr><td><strong>Schools</strong></td><td>Add schools; set CCAP or Non-CCAP (this decides high school approval) and CCAP agreement details; set which steps are required or optional; edit each school&rsquo;s Dual Enrollment course list, including period, teacher and the term a section is offered.</td></tr>
 <tr><td><strong>Courses</strong></td><td>Upload a school&rsquo;s Dual Enrollment courses for a term from a CSV or Excel file. Download the template, fill in one row per section (Code, Title, Units; optional Period, Teacher, Prerequisite), choose the school and term, and upload. Every row is checked first; nothing is imported if any row has a problem. Also keep the <strong>Concurrent Enrollment list</strong>: listed classes appear as checkboxes for every student (a prerequisite here sends the class to review automatically). Students can still type in any class that isn&rsquo;t listed.</td></tr>
 <tr><td><strong>Terms</strong></td><td>Add terms, set registration dates, mark summer terms, and turn registration on or off (which archives unregistered requests; see chapter 9).</td></tr>

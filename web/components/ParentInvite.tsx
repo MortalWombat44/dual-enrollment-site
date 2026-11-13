@@ -1,4 +1,4 @@
-import { headers } from 'next/headers';
+import { siteOrigin } from '@/lib/site';
 import { db } from '@/lib/db';
 import { inviteParent } from '@/lib/student-actions';
 import { InviteLink } from './InviteLink';
@@ -17,8 +17,7 @@ export async function ParentInvite({ studentId, invited, error }: { studentId: n
   const parents = db()
     .prepare('SELECT u.id, u.first_name, u.last_name, u.email, u.status, u.invite_token FROM parent_links l JOIN users u ON u.id = l.parent_id WHERE l.student_id = ? ORDER BY u.id')
     .all(studentId) as Parent[];
-  const h = await headers();
-  const origin = `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
+  const origin = await siteOrigin();
   const message = (link: string) => `Hi! I need your permission to take Shasta College classes through dual enrollment. Please make your account and sign my consent form here: ${link}`;
 
   return (

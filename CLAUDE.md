@@ -55,7 +55,7 @@ Before committing a behavior change:
   - **Every server action and page must check its role itself.**
   - `lib/access.ts` (`canSeeStudent`, `primarySchoolIds`) handles per-student visibility.
 - **Roles:**
-  - `users.role` is one of student, parent, hs (High School Staff) or admin.
+  - `users.role` is one of `student`, `parent`, `counselor` (shown as High School Staff; any staff type) or `admin`.
   - Admins have `admin_level` college or super.
   - Admin flags:
     - `is_college_counselor`: decides prerequisites and recommends young students.
@@ -71,7 +71,7 @@ Before committing a behavior change:
     4. Idempotent startup fixes: `removeRetiredSeedAccounts`, `sweepYoungDocs`, `backfillRegistrations`, `ensureHomeschool`
   - Use `tx(() => ...)` for multi-statement writes.
 - **Workflow engine** (`lib/workflow.ts`):
-  - `getProgress(studentId)` is the one place a student's step statuses are computed.
+  - `getProgress(studentId)` is the one place a student's step statuses are computed. **For lists, use `getProgressMany(ids)`** (a handful of queries in total); calling `getProgress` in a loop made the Students page take 4 seconds at 2,000 students.
   - Most steps are stored in `step_progress`. Several are **derived**:
     - High school approval (4): every `course_requests.hs_status = 'approved'`. CCAP schools and homeschool never need it.
     - Prerequisite review (8): every request with `needs_prereq` has `prereq_status = 'approved'`. It runs alongside step 7, not after it, so a student's `next` step is often 7 even when 8 needs them.
@@ -93,6 +93,8 @@ Before committing a behavior change:
 - **Notifications:**
   - `lib/notify.ts` (`notifyUsers`, `notifyLeads`, `adminsForStudent`) writes to the `notifications` table and emails through Resend when it's configured (`lib/mail.ts`).
   - Without email, links are logged, and shown on screen in demo mode.
+  - Account emails (reset links, invites, test email) are in `lib/account-mail.ts`. **Reset links go only to the email on file** (`sendResetLink` reads it from the database); never email or display a reset link anywhere else outside demo mode.
+  - Build links with `siteOrigin()` from `lib/site.ts` (uses `SITE_URL`); don't read the Host header directly.
 - **Other modules:**
   - PDFs: `lib/audit-pdf.ts` (pdf-lib).
   - ZIP export plus delayed deletion: `lib/file-archive.ts`. `web/instrumentation.ts` runs `runDueDeletions` every 30 seconds.
@@ -130,6 +132,8 @@ Ids were added over time.
   - "Today" means Pacific time (`lib/retire.ts`). `DE_TODAY=YYYY-MM-DD` overrides it for testing.
   - Stored timestamps are ISO strings. Compare them with SQLite `datetime()` when mixing in `CURRENT_TIMESTAMP` values.
 - **Upload size:** the server action body limit is 22 MB (`next.config.mjs`), enough for two 10 MB uploads.
+- **CSV exports:** use `csvCell` from `lib/csv.ts` for every cell (it neutralizes spreadsheet formulas).
+- **Retired / disabled students** (`users.disabled = 1`) stay out of staff queues, rosters and reports; only the admin "All students" tab lists them.
 - **Staff-only features** are deliberately not shown to students: the CCAP max-units option, staff names on approvals, nudges. Keep them out of student and parent views.
 - **Writing style:** UI text is plain language for students and parents. Use short sentences and no jargon. College systems (Colleague, SACP, RGPE, STAL, NCWS, myShasta, CCCApply) appear only where staff act on them.
 
@@ -138,6 +142,7 @@ Ids were added over time.
 - Each `e2eN.js` is a standalone Node script.
   - It drives Chromium against `http://localhost:3100`, and sometimes reads or writes the DB directly at `web/data/de.sqlite` to set up state.
   - It prints `ok - ...` lines and throws on failure.
+- A test can start the server with extra settings by adding `e2eN.env` (e2e28 connects a stand-in mail server this way).
 - `testlib.js` has the helpers: `grantConsent`, `addCe`, `fillProfile`, `clearUnits`.
 - Each test expects a **freshly seeded database** (`run.sh` restarts the server on an empty `data/` before every test), so tests never depend on each other's DB changes. The one file dependency: e2e13 writes `signed-form.pdf`, which e2e15, 17, 21 and 22 use, so keep the order in `run.sh`.
 - Wait for the right thing after a click that navigates or submits a server action:
@@ -163,7 +168,7 @@ Ids were added over time.
 - Render free plan: the disk is wiped on every restart or redeploy, so the DB goes back to demo data. Real use needs a paid plan, a persistent disk and `DE_DATA_DIR` set to its mount path.
 - Before real use:
   - Remove `SHOW_DEMO_ACCOUNTS=1`.
-  - Set `RESEND_API_KEY` and `MAIL_FROM` so emails send.
+  - Set `RESEND_API_KEY`, `MAIL_FROM` and `SITE_URL` so emails send (see "Connecting email" in `web/README.md`; the Users page has a test button).
   - Fill in `CONSENT_REVOKE_EMAIL` and `COUNSELING_APPOINTMENT_URL` in `lib/constants.ts`. They are still placeholders, and so is the contact on the guide's back page.
 - No named accounts with passwords are seeded in code. Real admins are created from Users.
 

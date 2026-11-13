@@ -12,7 +12,8 @@ export function mailConfigured() {
 export async function sendMail({ to, subject, text }: { to: string; subject: string; text: string }): Promise<boolean> {
   if (!mailConfigured()) return false;
   try {
-    const res = await fetch('https://api.resend.com/emails', {
+    // RESEND_API_URL is only for automated tests (a stand-in mail server). Leave it unset on the live site.
+    const res = await fetch(process.env.RESEND_API_URL || 'https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.MAIL_FROM, to: [to], subject, text }),

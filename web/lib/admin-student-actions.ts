@@ -8,7 +8,7 @@ import { clearNudges, nudgePrereq } from './nudge';
 import { actorOf, logEvent } from './audit';
 import { addTranscript, readUpload, releaseHolds } from './transcripts';
 import { mailConfigured, sendMail } from './mail';
-import { siteOrigin } from './approver-links';
+import { siteOrigin } from './site';
 import { HOLD_LABEL, courseName, type PrereqHold } from './workflow';
 import { addRequest, ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
@@ -336,11 +336,16 @@ export async function adminSetCourseTerm(formData: FormData) {
   if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
   const from = Number(formData.get('fromTermId')) || null;
   if (from === termId) redirect(back(formData));
+  const courseId = Number(formData.get('courseId'));
+  // Already requested in that term (even if archived): nothing to move.
+  if (db().prepare('SELECT 1 FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id = ?').get(studentId, courseId, termId)) redirect(back(formData, { error: 'term_taken' }));
+  // A class in a new term needs its own high school approval and its own prerequisite decision (both are per term).
+  const moved = db().prepare(`UPDATE course_requests SET term_id = ?, hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL,
+      prereq_status = NULL, prereq_by = NULL, prereq_at = NULL, prereq_hold = NULL, prereq_hold_note = NULL, prereq_hold_by = NULL, prereq_hold_at = NULL, prereq_reply = NULL, prereq_reply_at = NULL
+    WHERE student_id = ? AND course_id = ? AND term_id IS ?`).run(termId, studentId, courseId, from);
+  if (!Number(moved.changes)) redirect(back(formData));
   const tn = (id: number | null) => (id ? (db().prepare('SELECT name FROM terms WHERE id = ?').get(id) as { name: string } | undefined)?.name : null) ?? 'no term';
   logEvent(studentId, actorOf(me), `Moved ${courseName(Number(formData.get('courseId')))} to another term`, `${tn(from)} → ${tn(termId)}`, [from, termId]);
-  // A class in a new term needs its own high school approval.
-  db().prepare(`UPDATE OR IGNORE course_requests SET term_id = ?, hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL
-    WHERE student_id = ? AND course_id = ? AND term_id IS ?`).run(termId, studentId, Number(formData.get('courseId')), from);
   redirect(back(formData, { done: 'course_term' }));
 }
 

@@ -2,7 +2,7 @@ import { StudentContact } from '@/components/StudentContact';
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
-import { classLabel, currentGrade, GRADES, isYoung, openIdChange, ordinal, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
+import { classLabel, currentGrade, GRADES, isYoung, openIdChange, ordinal, nextRegistration, daysSince, fmt, getProgressMany, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
 import { approve, requestIdChange, staffSetGrade, staffUploadTranscript } from '@/lib/counselor-actions';
 import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
 import { HOLD_LABEL } from '@/lib/workflow';
@@ -23,8 +23,9 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
   const sp = await searchParams;
   const school = me.school_id ? getSchool(me.school_id) : null;
   const term = nextRegistration();
-  const ids = (db().prepare("SELECT id FROM users WHERE role = 'student' AND school_id = ? ORDER BY last_name, first_name").all(me.school_id) as { id: number }[]).map((r) => r.id);
-  const all = ids.map(getProgress).filter((p): p is StudentProgress => !!p);
+  // Retired (graduated) and disabled accounts aren't listed.
+  const ids = (db().prepare("SELECT id FROM users WHERE role = 'student' AND school_id = ? AND disabled = 0 ORDER BY last_name, first_name").all(me.school_id) as { id: number }[]).map((r) => r.id);
+  const all = [...getProgressMany(ids).values()];
   const s4 = (p: StudentProgress) => p.steps.find((s) => s.id === 4);
   const groups: Record<Tab, StudentProgress[]> = {
     ready: all.filter((p) => s4(p)?.status === 'in_review'),

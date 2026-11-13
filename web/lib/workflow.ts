@@ -191,42 +191,106 @@ function getUser(id: number | null): User | null {
 }
 
 export function getProgress(studentId: number): StudentProgress | null {
+  return getProgressMany([studentId]).get(studentId) ?? null;
+}
+
+const CHUNK = 400;
+/** Run a query with "IN (…)" over many ids, a few hundred at a time. */
+function rowsIn<T>(sql: (marks: string) => string, ids: number[]): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK);
+    out.push(...(db().prepare(sql(part.map(() => '?').join(','))).all(...part) as T[]));
+  }
+  return out;
+}
+function groupBy<T>(rows: T[], key: (r: T) => number): Map<number, T[]> {
+  const m = new Map<number, T[]>();
+  for (const r of rows) { const k = key(r); const list = m.get(k); if (list) list.push(r); else m.set(k, [r]); }
+  return m;
+}
+
+type ProgRow = { student_id: number; step_id: number; status: string; completed_at: string; seen: number; data: string | null };
+type Loaded = {
+  schools: Map<number, School>; terms: Map<number, Term>; fallbackTerm: Term; schoolModes: Map<number, Record<number, Mode>>;
+  enrollments: Map<number, { term_id: number; started_at: string | null; step_modes: string | null }>;
+  progress: Map<number, ProgRow[]>; courses: Map<number, (RequestedCourse & { student_id: number })[]>;
+  regs: Map<number, { student_id: number; term_id: number; crns: string | null; registered_at: string }[]>;
+  affidavits: Map<number, Affidavit>;
+  clearances: Map<number, { student_id: number; term_id: number; cleared_by: number; cleared_at: string }[]>;
+  parents: Map<number, User[]>; counselors: Map<number, User>;
+};
+
+/**
+ * Progress for many students at once (staff queues, rosters, reports): a handful of queries in total instead of
+ * about ten per student. Students keep the order of `ids`; ids that aren't students with a school are left out.
+ */
+export function getProgressMany(ids: number[]): Map<number, StudentProgress> {
+  const out = new Map<number, StudentProgress>();
+  if (!ids.length) return out;
   const d = db();
-  const student = getUser(studentId);
-  if (!student || student.role !== 'student' || !student.school_id) return null;
-  const school = getSchool(student.school_id)!;
-  const enr = d.prepare('SELECT term_id, started_at, step_modes FROM enrollments WHERE student_id = ?').get(studentId) as
-    | { term_id: number; started_at: string | null; step_modes: string | null }
-    | undefined;
-  const homeTerm = (enr && getTerm(enr.term_id)) || currentTerm();
-  const modes: Record<number, Mode> = enr?.step_modes ? JSON.parse(enr.step_modes) : schoolModes(school.id);
+  const students = rowsIn<User>((m) => `SELECT * FROM users WHERE id IN (${m}) AND role = 'student' AND school_id IS NOT NULL`, ids);
+  if (!students.length) return out;
+  const sids = students.map((u) => u.id);
+  const modeRows = d.prepare('SELECT school_id, step_id, mode FROM school_steps').all() as { school_id: number; step_id: number; mode: Mode }[];
+  const schoolModeMap = new Map<number, Record<number, Mode>>();
+  for (const r of modeRows) { const o = schoolModeMap.get(r.school_id) ?? {}; o[r.step_id] = r.mode; schoolModeMap.set(r.school_id, o); }
+  const affidavits = new Map<number, Affidavit>();
+  for (const a of rowsIn<Affidavit & { student_id: number }>((m) => `SELECT student_id, id, file_id, uploaded_by, uploaded_at, status, reviewed_by, reviewed_at, note FROM affidavits WHERE student_id IN (${m}) ORDER BY id`, sids)) {
+    const { student_id, ...rest } = a; affidavits.set(student_id, rest); // later rows win: the most recent upload
+  }
+  const counselorIds = [...new Set(students.map((u) => u.counselor_id).filter((id): id is number => !!id))];
+  const x: Loaded = {
+    schools: new Map((d.prepare('SELECT * FROM schools').all() as School[]).map((s) => [s.id, s])),
+    terms: new Map(allTerms().map((t) => [t.id, t])),
+    fallbackTerm: currentTerm(),
+    schoolModes: schoolModeMap,
+    enrollments: new Map(rowsIn<{ student_id: number; term_id: number; started_at: string | null; step_modes: string | null }>(
+      (m) => `SELECT student_id, term_id, started_at, step_modes FROM enrollments WHERE student_id IN (${m})`, sids).map((r) => [r.student_id, r])),
+    progress: groupBy(rowsIn<ProgRow>((m) => `SELECT student_id, step_id, status, completed_at, seen, data FROM step_progress WHERE student_id IN (${m})`, sids), (r) => r.student_id),
+    courses: groupBy(rowsIn<RequestedCourse & { student_id: number; opens: string | null }>((m) => `SELECT r.student_id, t.registration_opens AS opens, c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method, r.hs_signer_email,
+                     (c.prerequisite IS NOT NULL OR r.prereq_flag = 1) AS needs_prereq, r.prereq_flag, r.prereq_status, r.prereq_at, r.prereq_by,
+                     r.prereq_hold, r.prereq_hold_note, r.prereq_hold_by, r.prereq_hold_at, r.prereq_reply, r.prereq_reply_at
+              FROM course_requests r JOIN courses c ON c.id = r.course_id
+              LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id IN (${m}) AND r.archived_at IS NULL ORDER BY t.registration_opens, c.code`, sids), (r) => r.student_id),
+    regs: groupBy(rowsIn<{ student_id: number; term_id: number; crns: string | null; registered_at: string }>((m) => `SELECT student_id, term_id, crns, registered_at FROM registrations WHERE student_id IN (${m})`, sids), (r) => r.student_id),
+    affidavits,
+    clearances: groupBy(rowsIn<{ student_id: number; term_id: number; cleared_by: number; cleared_at: string }>((m) => `SELECT student_id, term_id, cleared_by, cleared_at FROM unit_clearances WHERE student_id IN (${m})`, sids), (r) => r.student_id),
+    parents: new Map([...groupBy(rowsIn<User & { linked_student: number }>((m) => `SELECT u.*, l.student_id AS linked_student FROM parent_links l JOIN users u ON u.id = l.parent_id WHERE l.student_id IN (${m})`, sids), (r) => r.linked_student)]),
+    counselors: new Map(rowsIn<User>((m) => `SELECT * FROM users WHERE id IN (${m})`, counselorIds).map((u) => [u.id, u])),
+  };
+  const byId = new Map(students.map((u) => [u.id, u]));
+  for (const id of ids) {
+    const u = byId.get(id);
+    const p = u && !out.has(id) ? computeProgress(u, x) : null;
+    if (p) out.set(id, p);
+  }
+  return out;
+}
+
+function computeProgress(student: User, x: Loaded): StudentProgress | null {
+  const studentId = student.id;
+  const school = x.schools.get(student.school_id!);
+  if (!school) return null;
+  const enr = x.enrollments.get(studentId);
+  const homeTerm = (enr && x.terms.get(enr.term_id)) || x.fallbackTerm;
+  const modes: Record<number, Mode> = enr?.step_modes ? JSON.parse(enr.step_modes) : { ...(x.schoolModes.get(school.id) ?? {}) };
   modes[4] = hsApprovalMode(school.designation); // set by school type, never by saved settings
   modes[9] = 'required'; modes[10] = 'required'; // young student review is policy, not a school setting
   // Homeschooled: no high school approval; the Private School Affidavit is reviewed by Shasta College instead.
   modes[11] = school.kind === 'homeschool' ? 'required' : 'off';
   if (school.kind === 'homeschool') modes[4] = 'off';
-  const prog = new Map(
-    (d.prepare('SELECT step_id, status, completed_at, seen, data FROM step_progress WHERE student_id = ?').all(studentId) as {
-      step_id: number; status: string; completed_at: string; seen: number; data: string | null;
-    }[]).map((r) => [r.step_id, r]),
-  );
+  const prog = new Map((x.progress.get(studentId) ?? []).map((r) => [r.step_id, r]));
   // A reviewer (Clear units, Prerequisite review or High school approval) sent the courses back.
   const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;
-  const courses = d
-    .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method, r.hs_signer_email,
-                     (c.prerequisite IS NOT NULL OR r.prereq_flag = 1) AS needs_prereq, r.prereq_flag, r.prereq_status, r.prereq_at, r.prereq_by,
-                     r.prereq_hold, r.prereq_hold_note, r.prereq_hold_by, r.prereq_hold_at, r.prereq_reply, r.prereq_reply_at
-              FROM course_requests r JOIN courses c ON c.id = r.course_id
-              LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? AND r.archived_at IS NULL ORDER BY t.registration_opens, c.code`)
-    .all(studentId) as RequestedCourse[];
+  const courses: RequestedCourse[] = x.courses.get(studentId) ?? [];
   // Classes carry their own term. The Register step follows the earliest registration date among them;
   // with no classes yet, the student's default term.
-  const requestTerms = [...new Set(courses.map((c) => c.term_id).filter((x): x is number => !!x))]
-    .map(getTerm).filter((t): t is Term => !!t)
+  const requestTerms = [...new Set(courses.map((c) => c.term_id).filter((id): id is number => !!id))]
+    .map((id) => x.terms.get(id)).filter((t): t is Term => !!t)
     .sort((a, b) => a.registration_opens.localeCompare(b.registration_opens));
   // Register for classes is per term: done when the student registered for every term they have classes in.
-  const regs = new Map((d.prepare('SELECT term_id, crns, registered_at FROM registrations WHERE student_id = ?').all(studentId) as
-    { term_id: number; crns: string | null; registered_at: string }[]).map((r) => [r.term_id, r]));
+  const regs = new Map((x.regs.get(studentId) ?? []).map((r) => [r.term_id, r]));
   const unregistered = requestTerms.filter((t) => !regs.has(t.id));
   const registeredAll = requestTerms.length > 0 && unregistered.length === 0;
   const lastReg = registeredAll ? requestTerms.map((t) => regs.get(t.id)!).sort((a, b) => a.registered_at.localeCompare(b.registered_at)).at(-1)! : null;
@@ -245,10 +309,9 @@ export function getProgress(studentId: number): StudentProgress | null {
   const prereqAt = prereqClasses.length && prereqDone ? prereqClasses.map((c) => c.prereq_at ?? '').sort().at(-1) || prog.get(8)?.completed_at || null : prog.get(8)?.completed_at ?? null;
   const young = isYoung(student);
   const adult = isAdult(student);
-  const affidavit = latestAffidavit(studentId);
+  const affidavit = x.affidavits.get(studentId) ?? null;
   // CCAP students cleared for the maximum units in a term skip Clear units for that term (classes added later included).
-  const maxCleared = new Map((d.prepare('SELECT term_id, cleared_by, cleared_at FROM unit_clearances WHERE student_id = ?').all(studentId) as
-    { term_id: number; cleared_by: number; cleared_at: string }[]).map((r) => [r.term_id, r]));
+  const maxCleared = new Map((x.clearances.get(studentId) ?? []).map((r) => [r.term_id, r]));
   const unitsByMax = school.designation === 'CCAP' && courses.length > 0 && courses.every((c) => c.term_id && maxCleared.has(c.term_id));
   const regOpen = new Date(term.registration_opens).getTime() <= Date.now();
 
@@ -300,11 +363,9 @@ export function getProgress(studentId: number): StudentProgress | null {
   const complete = steps.filter((s) => s.status === 'complete').length;
   const done = steps.every((s) => s.status === 'complete' || s.mode === 'optional');
   const next = steps.find((s) => s.status !== 'complete' && s.status !== 'locked') ?? null;
-  const parents = d
-    .prepare('SELECT u.* FROM parent_links l JOIN users u ON u.id = l.parent_id WHERE l.student_id = ?')
-    .all(studentId) as User[];
+  const parents = x.parents.get(studentId) ?? [];
   return {
-    student, school, term, counselor: getUser(student.counselor_id), parents, steps, complete, total: steps.length,
+    student, school, term, counselor: (student.counselor_id && x.counselors.get(student.counselor_id)) || null, parents, steps, complete, total: steps.length,
     done, next, courses, requestTerms, termLabel, registeredTermIds: [...regs.keys()], startedAt: enr?.started_at ?? null,
     changeNote: changeRow?.data ? (JSON.parse(changeRow.data).note as string) ?? null : null,
     changeBy: changeRow ? (changeRow.step_id === 4 ? 'counselor' : 'college') : null,
@@ -535,6 +596,14 @@ export function sharedStudentIds(): Map<string, { id: number; name: string }[]> 
   const out = new Map<string, { id: number; name: string }[]>();
   for (const r of rows) out.set(r.num, [...(out.get(r.num) ?? []), { id: r.id, name: r.name }]);
   return out;
+}
+
+/** Students with an open school-change or ID-change request (for the queue tabs, in one query each). */
+export function openSchoolChangeIds(): Set<number> {
+  return new Set((db().prepare("SELECT DISTINCT student_id FROM school_change_requests WHERE status = 'open'").all() as { student_id: number }[]).map((r) => r.student_id));
+}
+export function openIdChangeIds(): Set<number> {
+  return new Set((db().prepare("SELECT DISTINCT student_id FROM id_change_requests WHERE status = 'open'").all() as { student_id: number }[]).map((r) => r.student_id));
 }
 
 /** A student's open "please change my high school" request, if any. */

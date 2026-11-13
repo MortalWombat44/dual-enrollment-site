@@ -1,6 +1,6 @@
 import 'server-only';
 import { db } from './db';
-import { getProgress, isYoung, pad, type Course } from './workflow';
+import { getProgressMany, isYoung, type Course } from './workflow';
 import { stepOnLabel } from './workflow';
 
 export type RosterStudent = {
@@ -27,9 +27,8 @@ export function schoolRoster(schoolId: number, termId?: number): RosterClass[] {
   const classes = new Map<number, RosterClass>();
   for (const c of [...de, ...requested]) if (!classes.has(c.id)) classes.set(c.id, { ...c, students: [] });
 
-  const progress = new Map<number, ReturnType<typeof getProgress>>();
+  const progress = getProgressMany([...new Set(reqs.map((r) => r.student_id))]);
   for (const r of reqs) {
-    if (!progress.has(r.student_id)) progress.set(r.student_id, getProgress(r.student_id));
     const p = progress.get(r.student_id);
     if (!p) continue;
     classes.get(r.course_id)?.students.push({
