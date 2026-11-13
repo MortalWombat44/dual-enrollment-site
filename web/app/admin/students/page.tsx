@@ -305,6 +305,73 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
   const recBy = rec ? (db().prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(rec.rec_by) as { first_name: string; last_name: string } | undefined) : undefined;
   const offered = schoolCourses(p.school.id);
   const consent = p.steps.find((s) => s.id === 3);
+  // College counselors work prerequisites: put Prerequisite review (and its transcripts) above College review for them.
+  const counselorFirst = !!me.is_college_counselor && s8?.status === 'in_review';
+  const prereqBlock = (
+    <>
+        {s8?.status === 'in_review' && (
+          <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
+            <Hidden p={p} keep={keep} />
+            <input type="hidden" name="stepId" value={8} />
+            <div className="kicker accent700">Prerequisite review</div>
+            {!me.is_college_counselor && <div style={{ fontSize: 13 }}>Only admins designated as college counselors can approve or decline these.</div>}
+            {p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => (
+              <div key={`${c.id}-${c.term_id}`} data-prereq={`${c.code} ${c.term_name ?? ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--color-divider)' }}>
+                <div style={{ fontSize: 14 }}><strong>{c.code}</strong> · {c.title} <span className="ink60">· {c.term_name ?? 'No term'}</span></div>
+                <div className="ink60" style={{ fontSize: 13 }}>Prerequisite: {c.prerequisite ?? 'flagged for review (the student hadn’t marked one)'}</div>
+                {c.prereq_hold && (
+                  <div style={{ fontSize: 13, background: '#fff4e0', color: '#6b3a00', padding: '6px 10px' }} data-held={c.prereq_hold}>
+                    <strong>On hold: {HOLD_LABEL[c.prereq_hold].replace('Prerequisite: ', '')}</strong> since {fmt(c.prereq_hold_at)}{c.prereq_hold_note ? <> · “{c.prereq_hold_note}”</> : ''}
+                  </div>
+                )}
+                {c.prereq_reply && <div style={{ fontSize: 13, borderLeft: '3px solid var(--color-accent)', paddingLeft: 8 }} data-reply>Student replied {fmt(c.prereq_reply_at)}: “{c.prereq_reply}”</div>}
+                <div className="seg seg-modes seg-wrap" role="radiogroup" aria-label={`${c.code} ${c.term_name ?? ''} decision`} style={{ alignSelf: 'flex-start' }}>
+                  <label className="seg-opt" data-v="required"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="approve" disabled={!me.is_college_counselor} />Approve</label>
+                  <label className="seg-opt" data-v="off"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="decline" disabled={!me.is_college_counselor} />Decline</label>
+                  <label className="seg-opt" data-v="optional"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="info" disabled={!me.is_college_counselor} />More info needed</label>
+                  <label className="seg-opt" data-v="optional"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="appointment" disabled={!me.is_college_counselor} />Appointment required</label>
+                </div>
+                {c.prereq_hold && <div className="ink60" style={{ fontSize: 12 }}>Leave all four unchecked to keep it on hold.</div>}
+              </div>
+            ))}
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, fontWeight: 700 }}>
+              <input type="checkbox" name="ncws" disabled={!me.is_college_counselor} style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
+              Student cleared in NCWS <span className="ink60" style={{ fontWeight: 400 }}>(required to approve)</span>
+            </label>
+            <div className="field"><label htmlFor="n8">Note to student (required if you decline or need more information)</label><textarea id="n8" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
+            <button formAction={decidePrerequisites} className="btn btn-primary" disabled={!me.is_college_counselor} style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decisions <span>→</span></button>
+          </form>
+        )}
+
+        {s8?.status === 'in_review' && (
+          <form className="pad-sm" style={{ ...section, background: nudge ? '#fdecea' : undefined }}>
+            <Hidden p={p} keep={keep} />
+            <div className="kicker" style={{ color: '#b3261e' }}>{nudge ? 'Nudged' : 'Nudge college counselors'}</div>
+            {nudge ? (
+              <div style={{ fontSize: 14 }}>
+                Nudged by {nudge.by_name ?? 'an admin'} on {fmt(nudge.created_at)}{nudge.note ? <>: “{nudge.note}”</> : '.'} The student is at the top of the Prerequisites queue until a counselor decides.
+              </div>
+            ) : (
+              <div style={{ fontSize: 14 }}>Ask college counselors to prioritize this review. They&apos;re notified, and the student goes to the top of their Prerequisites queue, highlighted red.</div>
+            )}
+            <input name="note" className="input" maxLength={300} placeholder="Why it's urgent (optional)" aria-label="Why it's urgent" />
+            <button formAction={nudgePrerequisite} className="btn btn-secondary" style={{ alignSelf: 'flex-start', color: '#b3261e', borderColor: '#b3261e' }}>{nudge ? 'Nudge again' : 'Nudge'}</button>
+          </form>
+        )}
+
+        {p.courses.filter((c) => c.prereq_hold && c.prereq_status !== 'approved').map((c) => (
+          <form key={`hold-${c.id}-${c.term_id}`} className="pad-sm" style={{ ...section, background: '#fff4e0', paddingTop: 12, paddingBottom: 12 }}>
+            <Hidden p={p} keep={keep} />
+            <input type="hidden" name="courseId" value={c.id} />
+            <input type="hidden" name="fromTermId" value={c.term_id ?? ''} />
+            <div style={{ fontSize: 14 }}><strong>{c.code}</strong> ({c.term_name ?? 'no term'}) is waiting on the student: {HOLD_LABEL[c.prereq_hold!].replace('Prerequisite: ', '').toLowerCase()}.</div>
+            <button formAction={releasePrereqHold} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>{c.prereq_hold === 'appointment' ? 'Appointment done: back to queue' : 'Back to queue'}</button>
+          </form>
+        ))}
+
+        <Transcripts p={p} keep={keep} />
+    </>
+  );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div className="pad-sm" style={{ padding: '24px 32px', borderBottom: '2px solid var(--color-divider)' }}>
@@ -356,6 +423,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
+      {counselorFirst && prereqBlock}
       {s7?.status === 'in_review' && (
         <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
           <Hidden p={p} keep={keep} />
@@ -385,67 +453,7 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
-      {s8?.status === 'in_review' && (
-        <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
-          <Hidden p={p} keep={keep} />
-          <input type="hidden" name="stepId" value={8} />
-          <div className="kicker accent700">Prerequisite review</div>
-          {!me.is_college_counselor && <div style={{ fontSize: 13 }}>Only admins designated as college counselors can approve or decline these.</div>}
-          {p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => (
-            <div key={`${c.id}-${c.term_id}`} data-prereq={`${c.code} ${c.term_name ?? ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--color-divider)' }}>
-              <div style={{ fontSize: 14 }}><strong>{c.code}</strong> · {c.title} <span className="ink60">· {c.term_name ?? 'No term'}</span></div>
-              <div className="ink60" style={{ fontSize: 13 }}>Prerequisite: {c.prerequisite ?? 'flagged for review (the student hadn’t marked one)'}</div>
-              {c.prereq_hold && (
-                <div style={{ fontSize: 13, background: '#fff4e0', color: '#6b3a00', padding: '6px 10px' }} data-held={c.prereq_hold}>
-                  <strong>On hold: {HOLD_LABEL[c.prereq_hold].replace('Prerequisite: ', '')}</strong> since {fmt(c.prereq_hold_at)}{c.prereq_hold_note ? <> · “{c.prereq_hold_note}”</> : ''}
-                </div>
-              )}
-              {c.prereq_reply && <div style={{ fontSize: 13, borderLeft: '3px solid var(--color-accent)', paddingLeft: 8 }} data-reply>Student replied {fmt(c.prereq_reply_at)}: “{c.prereq_reply}”</div>}
-              <div className="seg seg-modes seg-wrap" role="radiogroup" aria-label={`${c.code} ${c.term_name ?? ''} decision`} style={{ alignSelf: 'flex-start' }}>
-                <label className="seg-opt" data-v="required"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="approve" disabled={!me.is_college_counselor} />Approve</label>
-                <label className="seg-opt" data-v="off"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="decline" disabled={!me.is_college_counselor} />Decline</label>
-                <label className="seg-opt" data-v="optional"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="info" disabled={!me.is_college_counselor} />More info needed</label>
-                <label className="seg-opt" data-v="optional"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="appointment" disabled={!me.is_college_counselor} />Appointment required</label>
-              </div>
-              {c.prereq_hold && <div className="ink60" style={{ fontSize: 12 }}>Leave all four unchecked to keep it on hold.</div>}
-            </div>
-          ))}
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, fontWeight: 700 }}>
-            <input type="checkbox" name="ncws" disabled={!me.is_college_counselor} style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
-            Student cleared in NCWS <span className="ink60" style={{ fontWeight: 400 }}>(required to approve)</span>
-          </label>
-          <div className="field"><label htmlFor="n8">Note to student (required if you decline or need more information)</label><textarea id="n8" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
-          <button formAction={decidePrerequisites} className="btn btn-primary" disabled={!me.is_college_counselor} style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decisions <span>→</span></button>
-        </form>
-      )}
-
-      {s8?.status === 'in_review' && (
-        <form className="pad-sm" style={{ ...section, background: nudge ? '#fdecea' : undefined }}>
-          <Hidden p={p} keep={keep} />
-          <div className="kicker" style={{ color: '#b3261e' }}>{nudge ? 'Nudged' : 'Nudge college counselors'}</div>
-          {nudge ? (
-            <div style={{ fontSize: 14 }}>
-              Nudged by {nudge.by_name ?? 'an admin'} on {fmt(nudge.created_at)}{nudge.note ? <>: “{nudge.note}”</> : '.'} The student is at the top of the Prerequisites queue until a counselor decides.
-            </div>
-          ) : (
-            <div style={{ fontSize: 14 }}>Ask college counselors to prioritize this review. They&apos;re notified, and the student goes to the top of their Prerequisites queue, highlighted red.</div>
-          )}
-          <input name="note" className="input" maxLength={300} placeholder="Why it's urgent (optional)" aria-label="Why it's urgent" />
-          <button formAction={nudgePrerequisite} className="btn btn-secondary" style={{ alignSelf: 'flex-start', color: '#b3261e', borderColor: '#b3261e' }}>{nudge ? 'Nudge again' : 'Nudge'}</button>
-        </form>
-      )}
-
-      {p.courses.filter((c) => c.prereq_hold && c.prereq_status !== 'approved').map((c) => (
-        <form key={`hold-${c.id}-${c.term_id}`} className="pad-sm" style={{ ...section, background: '#fff4e0', paddingTop: 12, paddingBottom: 12 }}>
-          <Hidden p={p} keep={keep} />
-          <input type="hidden" name="courseId" value={c.id} />
-          <input type="hidden" name="fromTermId" value={c.term_id ?? ''} />
-          <div style={{ fontSize: 14 }}><strong>{c.code}</strong> ({c.term_name ?? 'no term'}) is waiting on the student: {HOLD_LABEL[c.prereq_hold!].replace('Prerequisite: ', '').toLowerCase()}.</div>
-          <button formAction={releasePrereqHold} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>{c.prereq_hold === 'appointment' ? 'Appointment done: back to queue' : 'Back to queue'}</button>
-        </form>
-      ))}
-
-      <Transcripts p={p} keep={keep} />
+      {!counselorFirst && prereqBlock}
 
       {helpList.filter((h) => h.status === 'open').map((h) => (
         <form key={h.id} className="pad-sm" style={{ ...section, background: '#fff4e0' }}>

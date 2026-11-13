@@ -141,7 +141,7 @@ body.append('</section>')
 
 # ---------------------------------------------------------------- 6
 body.append(h2('reviews', '06', 'Other reviews'))
-body.append('<h3>Prerequisite review</h3><p>Only admins designated as <strong>college counselors</strong> can decide these; any admin can see them. Each class is decided separately <em>for each term</em>, so the same class can be approved for Spring and declined for Summer. A class is reviewed when its course has a prerequisite, or when someone flags it.</p>')
+body.append('<h3>Prerequisite review</h3><p>Only admins designated as <strong>college counselors</strong> can decide these; any admin can see them. For college counselors, Prerequisite review appears at the top of the student panel, above College review. Each class is decided separately <em>for each term</em>, so the same class can be approved for Spring and declined for Summer. A class is reviewed when its course has a prerequisite, or when someone flags it.</p>')
 body.append(callout('info', 'Classes the student didn&rsquo;t mark', 'Under <em>Classes requested</em>, a class with no prerequisite shows &ldquo;No prerequisite selected&rdquo;. If you know it has one, click <strong>Needs prerequisite review</strong>: it goes into the Prerequisites queue right away, even after College review, and nothing else is reopened. Students can do the same from Course selection (&ldquo;Missed a prerequisite?&rdquo;).'))
 body.append(steps(
     'Open the <strong>Prerequisites</strong> tab and click a student.',

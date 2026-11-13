@@ -29,6 +29,15 @@ const submit = async (p, btn) => { await Promise.all([p.waitForURL(/done=|error=
   // --- Counselor: More information needed ---
   const jk = await login(b, 'jkim@shastacollege.edu');
   await jk.goto(`${B}/admin/students?tab=prereq&student=${ethan}`);
+  const top = async (p, text) => (await p.locator('.kicker', { hasText: text }).first().boundingBox()).y;
+  check(await top(jk, 'Prerequisite review') < await top(jk, 'College review & clear units'), 'college counselor: Prerequisite review is above College review');
+  // Not a college counselor: College review stays first.
+  const wasCounselor = sql("SELECT is_college_counselor AS c FROM users WHERE email = 'dortiz@shastacollege.edu'")[0].c;
+  sql("UPDATE users SET is_college_counselor = 0 WHERE email = 'dortiz@shastacollege.edu'");
+  const nc = await login(b, 'dortiz@shastacollege.edu');
+  await nc.goto(`${B}/admin/students?tab=prereq&student=${ethan}`);
+  check(await top(nc, 'College review & clear units') < await top(nc, 'Prerequisite review'), 'other admins: College review stays on top');
+  sql("UPDATE users SET is_college_counselor = ? WHERE email = 'dortiz@shastacollege.edu'", wasCounselor);
   const math = jk.locator('[data-prereq^="MATH 13"]');
   check(await math.count() === 1, 'MATH 13 in Ethan’s prerequisite review');
   check(await math.locator('input[value="info"]').count() === 1 && await math.locator('input[value="appointment"]').count() === 1, 'four choices: approve, decline, more info, appointment');
@@ -110,6 +119,7 @@ const submit = async (p, btn) => { await Promise.all([p.waitForURL(/done=|error=
 
   // --- Bulk upload ---
   const sa = await login(b, 'dortiz@shastacollege.edu');
+
   await sa.goto(B + '/admin/transcripts');
   await sa.locator('input[name="files"]').setInputFiles([
     pdf('0412893_transcript.pdf'),      // Maya by ID
