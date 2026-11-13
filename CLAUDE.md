@@ -169,5 +169,7 @@ Ids were added over time.
 
 ## Git
 
+- The code is proprietary (see `LICENSE`, all rights reserved) and the GitHub repository is private. Don't add open-source license files or make it public.
+
 - Work on `main` unless told otherwise. Commit and push only when the owner asks, or as part of a finished change they requested.
 - Don't put model names in commits or code.
