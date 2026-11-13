@@ -74,7 +74,8 @@ Before committing a behavior change:
   - `getProgress(studentId)` is the one place a student's step statuses are computed.
   - Most steps are stored in `step_progress`. Several are **derived**:
     - High school approval (4): every `course_requests.hs_status = 'approved'`. CCAP schools and homeschool never need it.
-    - Prerequisite review (8): every request with `needs_prereq` has `prereq_status = 'approved'`. It runs alongside step 7, not after it.
+    - Prerequisite review (8): every request with `needs_prereq` has `prereq_status = 'approved'`. It runs alongside step 7, not after it, so a student's `next` step is often 7 even when 8 needs them.
+      A class can be on hold (`course_requests.prereq_hold` = `'info'` | `'appointment'`). When every remaining class is held, step 8 gets `hold` and the student shows in the "waiting on student" tab instead of the counselor queue.
     - College review & clear units (7): auto-complete through `unit_clearances` (the CCAP "cleared for max units" option).
     - Register (5): a `registrations` row for every term the student has requests in. Shows Ready / Overdue after `REGISTER_GRACE_DAYS`.
     - Parent consent (3): skipped when `isAdult` (18+ today, Pacific time, from DOB).
@@ -97,6 +98,12 @@ Before committing a behavior change:
   - ZIP export plus delayed deletion: `lib/file-archive.ts`. `web/instrumentation.ts` runs `runDueDeletions` every 30 seconds.
   - Course CSV/Excel import: `lib/course-import.ts` (exceljs).
   - Outside high school approver links: `lib/approver-links.ts` (stores only a SHA-256 token hash).
+  - Transcripts (prerequisite review): `lib/transcripts.ts` (`addTranscript`, `releaseHolds`, file-name matching for bulk upload, the `transcript_inbox` table). The bulk upload posts one file per request to the route `app/admin/transcripts/upload/route.ts`, so the server action size limit doesn't apply.
+- **History / audit trail** (`lib/audit.ts`, table `audit_events`):
+  - **Every action that changes a student's record must call `logEvent(studentId, actorOf(me), action, detail, terms)`.**
+  - `terms`: the class's term(s), `'student'` for step-level events (files them under every term the student has classes in), or omit for account-wide events.
+  - Actor name and role are stored as text at the time. Events are never edited.
+  - `addRequest(..., by)` logs class requests itself; pass the actor.
 
 ## Step ids ≠ step order
 
@@ -157,7 +164,7 @@ Ids were added over time.
 - Before real use:
   - Remove `SHOW_DEMO_ACCOUNTS=1`.
   - Set `RESEND_API_KEY` and `MAIL_FROM` so emails send.
-  - Fill in `CONSENT_REVOKE_EMAIL` in `lib/constants.ts`. It is still a placeholder, and so is the contact on the guide's back page.
+  - Fill in `CONSENT_REVOKE_EMAIL` and `COUNSELING_APPOINTMENT_URL` in `lib/constants.ts`. They are still placeholders, and so is the contact on the guide's back page.
 - No named accounts with passwords are seeded in code. Real admins are created from Users.
 
 ## Git

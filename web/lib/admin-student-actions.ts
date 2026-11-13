@@ -5,6 +5,11 @@ import { db, tx } from './db';
 import { sendApproverLink } from './approver-links';
 import { notifyLeads } from './notify';
 import { clearNudges, nudgePrereq } from './nudge';
+import { actorOf, logEvent } from './audit';
+import { addTranscript, readUpload, releaseHolds } from './transcripts';
+import { mailConfigured, sendMail } from './mail';
+import { siteOrigin } from './approver-links';
+import { HOLD_LABEL, courseName, type PrereqHold } from './workflow';
 import { addRequest, ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
@@ -47,10 +52,19 @@ export async function clearUnits(formData: FormData) {
     const at = new Date().toISOString();
     for (const t of p.requestTerms) ins.run(studentId, t.id, me.id, at);
   }
+  const units = p.courses.reduce((n, c) => n + c.units, 0);
   completeStep(studentId, 7, {
-    admin_id: me.id, school_id: p.school.id, note, units: p.courses.reduce((n, c) => n + c.units, 0), max_units: maxUnits || undefined,
+    admin_id: me.id, school_id: p.school.id, note, units, max_units: maxUnits || undefined,
     verified: { student_number: num, id_changed_from: num !== oldNum ? oldNum : undefined, sacp: true, rgpe: true, stal: true },
   }, true);
+  for (const t of p.requestTerms) {
+    const termUnits = p.courses.filter((c) => c.term_id === t.id).reduce((n, c) => n + c.units, 0);
+    logEvent(studentId, actorOf(me), 'College review done and units cleared', [
+      `Verified Program (SACP), Start date (RGPE), Cohort (STAL) in Colleague`,
+      `Shasta College ID ${num}${num !== oldNum ? ` (changed from ${oldNum ?? 'none'})` : ''}`,
+      `${termUnits} units in ${t.name}`, maxUnits ? 'Cleared for the maximum units' : '', note ? `Note: ${note}` : '',
+    ].filter(Boolean).join(' · '), [t.id]);
+  }
   redirect(back(formData, { done: 'cleared' }));
 }
 
@@ -61,11 +75,16 @@ export async function sendBackToStudent(formData: FormData) {
   if (![7, 8].includes(stepId) || p.steps.find((s) => s.id === stepId)?.status !== 'in_review') redirect(back(formData));
   if (!note) redirect(back(formData, { error: 'note' }));
   if (stepId === 8) clearNudges(studentId);
+  logEvent(studentId, actorOf(me), `Sent back to the student from ${stepId === 7 ? 'College review' : 'Prerequisite review'}`, note, 'student');
   requestChanges(studentId, stepId, me, note);
   redirect(back(formData, { done: 'sent_back' }));
 }
 
-/** Step 8 · Prerequisite review, college counselors only. Declined classes come off the request. */
+/**
+ * Step 8 · Prerequisite review, college counselors only. For each class: approve, decline (comes off the request),
+ * or put it on hold until the student responds: "More information needed" or "Appointment with a college counselor
+ * required". Classes already on hold can be left as they are.
+ */
 export async function decidePrerequisites(formData: FormData) {
   const { me, studentId, p, note } = await load(formData);
   if (!me.is_college_counselor) redirect(back(formData, { error: 'not_counselor' }));
@@ -73,29 +92,80 @@ export async function decidePrerequisites(formData: FormData) {
   // One decision per class per term (the same class can be requested in two terms). Classes already approved stay approved.
   const prereq = p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved');
   const field = (c: { id: number; term_id: number | null }) => `course_${c.id}_${c.term_id ?? 0}`;
-  if (!prereq.length || prereq.some((c) => !['approve', 'decline'].includes(String(formData.get(field(c)) || '')))) redirect(back(formData, { error: 'decide' }));
-  const decisions = prereq.map((c) => ({ id: c.id, term_id: c.term_id, code: c.code, term: c.term_name, decision: formData.get(field(c)) === 'decline' ? 'declined' : 'approved' }));
-  const declined = decisions.filter((d) => d.decision === 'declined');
+  const choice = (c: (typeof prereq)[number]) => String(formData.get(field(c)) || (c.prereq_hold ? 'keep' : ''));
+  if (!prereq.length || prereq.some((c) => !['approve', 'decline', 'info', 'appointment', 'keep'].includes(choice(c)))) redirect(back(formData, { error: 'decide' }));
+  const decisions = prereq.map((c) => ({ id: c.id, term_id: c.term_id, code: c.code, term: c.term_name, choice: choice(c),
+    decision: choice(c) === 'decline' ? 'declined' : choice(c) === 'approve' ? 'approved' : 'on_hold' }));
+  const declined = decisions.filter((d) => d.choice === 'decline');
+  const holds = decisions.filter((d) => d.choice === 'info' || d.choice === 'appointment');
   if (declined.length && !note) redirect(back(formData, { error: 'note' }));
-  // Approving needs the student cleared in NCWS first (declining doesn't).
+  if (holds.some((d) => d.choice === 'info') && !note) redirect(back(formData, { error: 'info_note' }));
+  // Approving needs the student cleared in NCWS first (declining or a hold doesn't).
   const ncws = formData.get('ncws') === 'on';
   if (decisions.some((d) => d.decision === 'approved') && !ncws) redirect(back(formData, { error: 'ncws' }));
   const at = new Date().toISOString();
+  const who = actorOf(me);
   tx(() => {
-    const ok = db().prepare("UPDATE course_requests SET prereq_status = 'approved', prereq_by = ?, prereq_at = ? WHERE student_id = ? AND course_id = ? AND term_id IS ?");
-    for (const d of decisions) if (d.decision === 'approved') ok.run(me.id, at, studentId, d.id, d.term_id);
+    const ok = db().prepare(`UPDATE course_requests SET prereq_status = 'approved', prereq_by = ?, prereq_at = ?, prereq_hold = NULL, prereq_hold_note = NULL,
+      prereq_hold_by = NULL, prereq_hold_at = NULL WHERE student_id = ? AND course_id = ? AND term_id IS ?`);
+    const hold = db().prepare(`UPDATE course_requests SET prereq_hold = ?, prereq_hold_note = ?, prereq_hold_by = ?, prereq_hold_at = ?, prereq_reply = NULL, prereq_reply_at = NULL
+      WHERE student_id = ? AND course_id = ? AND term_id IS ?`);
     const del = db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?');
-    for (const d of declined) del.run(studentId, d.id, d.term_id);
+    for (const d of decisions) {
+      if (d.choice === 'approve') {
+        ok.run(me.id, at, studentId, d.id, d.term_id);
+        logEvent(studentId, who, `Prerequisite approved for ${d.code}`, `Student cleared in NCWS${note ? ` · Note: ${note}` : ''}`, [d.term_id]);
+      } else if (d.choice === 'decline') {
+        del.run(studentId, d.id, d.term_id);
+        logEvent(studentId, who, `Prerequisite declined for ${d.code}; class removed`, note, [d.term_id]);
+      } else if (d.choice === 'info' || d.choice === 'appointment') {
+        hold.run(d.choice, note || null, me.id, at, studentId, d.id, d.term_id);
+        logEvent(studentId, who, `${HOLD_LABEL[d.choice as PrereqHold]}: ${d.code}`, note || null, [d.term_id]);
+      }
+    }
   });
   clearNudges(studentId);
+  if (holds.length) await emailHold(p.student, holds.map((d) => d.code), holds.some((d) => d.choice === 'info') ? 'info' : 'appointment', note);
   const remaining = p.courses.length - declined.length;
   if (remaining === 0) {
     // Nothing left to take: the student picks again.
     requestChanges(studentId, 8, me, note);
     redirect(back(formData, { done: 'sent_back' }));
   }
-  completeStep(studentId, 8, { admin_id: me.id, note, decisions, ncws_cleared: ncws }, true);
-  redirect(back(formData, { done: 'prereq' }));
+  const waiting = decisions.filter((d) => d.decision === 'on_hold');
+  if (!waiting.length) completeStep(studentId, 8, { admin_id: me.id, note, decisions, ncws_cleared: ncws }, true);
+  redirect(back(formData, { done: waiting.length ? 'prereq_hold' : 'prereq' }));
+}
+
+/** Tell the student (when email is set up) that a counselor needs something before deciding. They also see it on their steps. */
+async function emailHold(s: { email: string; first_name: string }, codes: string[], kind: PrereqHold, note: string) {
+  if (!mailConfigured()) return;
+  const what = kind === 'info'
+    ? 'needs more information before deciding on the prerequisite'
+    : 'needs you to make an appointment with a Shasta College counselor before deciding on the prerequisite';
+  await sendMail({
+    to: s.email,
+    subject: `Dual Enrollment: ${HOLD_LABEL[kind]}`,
+    text: `Hi ${s.first_name},\n\nA Shasta College counselor ${what} for ${codes.join(', ')}.${note ? `\n\nTheir note: ${note}` : ''}\n\nSee what to do: ${await siteOrigin()}/student/steps/8\n\nShasta College Dual Enrollment`,
+  });
+}
+
+/** Take a class off hold and put it back in the counselor queue (e.g. after the student's appointment). */
+export async function releasePrereqHold(formData: FormData) {
+  const { me, studentId } = await load(formData);
+  const courseId = Number(formData.get('courseId'));
+  const termId = Number(formData.get('fromTermId')) || null;
+  const r = await releaseHolds(studentId, ['info', 'appointment'], actorOf(me), `${me.first_name} ${me.last_name} put it back in the queue`, { courseId, termId });
+  redirect(back(formData, { done: r.length ? 'hold_released' : 'hold_none' }));
+}
+
+/** A college admin uploads a transcript on the student's behalf. */
+export async function adminUploadTranscript(formData: FormData) {
+  const { me, studentId } = await load(formData);
+  const f = await readUpload(formData.get('transcript'));
+  if ('error' in f) redirect(back(formData, { error: `tr_${f.error}` }));
+  await addTranscript(studentId, { ...actorOf(me), id: me.id }, f as { buf: Buffer; mime: string; name: string }, 'Uploaded by Shasta College');
+  redirect(back(formData, { done: 'transcript' }));
 }
 
 /** Young student review, part 1: a college counselor recommends (or not) and gives feedback. */
@@ -109,6 +179,7 @@ export async function recommendYoung(formData: FormData) {
   const data: YoungRec = { rec_by: me.id, rec: rec as YoungRec['rec'], rec_note: note, rec_at: new Date().toISOString() };
   db().prepare('INSERT OR REPLACE INTO young_reviews (student_id, rec_by, rec, rec_note, rec_at) VALUES (?,?,?,?,?)')
     .run(studentId, data.rec_by, data.rec, data.rec_note, data.rec_at);
+  logEvent(studentId, actorOf(me), `Young student review: ${rec === 'recommend' ? 'recommended' : 'not recommended'}`, note, 'student');
   await notifyLeads('young', studentId, `${p.student.first_name} ${p.student.last_name} (young student): ${rec === 'recommend' ? 'recommended' : 'not recommended'} by ${me.first_name} ${me.last_name}. A Young Student Approver makes the final decision.`);
   redirect(back(formData, { done: 'young_rec' }));
 }
@@ -123,11 +194,13 @@ export async function decideYoung(formData: FormData) {
   const decision = formData.get('decision');
   if (decision === 'approve') {
     completeStep(studentId, 10, { ...rec, admin_id: me.id, decision: 'approved', note }, true);
+    logEvent(studentId, actorOf(me), 'Young student review: approved', note || null, 'student');
     db().prepare('DELETE FROM young_reviews WHERE student_id = ?').run(studentId);
     redirect(back(formData, { done: 'young_approved' }));
   }
   if (decision !== 'decline') redirect(back(formData, { error: 'decide' }));
   if (!note) redirect(back(formData, { error: 'note' }));
+  logEvent(studentId, actorOf(me), 'Young student review: declined; sent back to Course selection', note, 'student');
   requestChanges(studentId, 10, me, note);
   redirect(back(formData, { done: 'young_declined' }));
 }
@@ -164,12 +237,16 @@ export async function adminCompleteStep(formData: FormData) {
       WHERE student_id = ? AND hs_status = 'pending'`).run(me.id, new Date().toISOString(), studentId);
   }
   completeStep(studentId, stepId, data, true);
+  logEvent(studentId, actorOf(me), `Marked “${s!.short}” complete (staff override)`,
+    stepId === 8 && p.courses.some((c) => c.needs_prereq && c.prereq_status !== 'approved')
+      ? `Approved without counselor review: ${p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => c.code).join(', ')}` : null,
+    [1, 3, 11].includes(stepId) ? [] : 'student');
   redirect(back(formData, { done: 'moved' }));
 }
 
 /** Override · move a step backward (reopen it and every step after it). */
 export async function adminReopenStep(formData: FormData) {
-  const { studentId, p } = await load(formData);
+  const { me, studentId, p } = await load(formData);
   const stepId = Number(formData.get('stepId'));
   if (!STUDENT_STEP_IDS.includes(stepId)) redirect(back(formData));
   if (stepId === 4) {
@@ -177,12 +254,14 @@ export async function adminReopenStep(formData: FormData) {
     const approved = p.courses.filter((c) => c.hs_status === 'approved').map((c) => `${c.code} (${c.term_name ?? 'no term'})`);
     redirect(back(formData, { done: 'hs_already', classes: approved.join(', ') }));
   }
+  const s = p.steps.find((x) => x.id === stepId);
+  logEvent(studentId, actorOf(me), `Moved “${s?.short ?? 'a step'}” back (reopened it and the steps after it)`, null, [1, 3, 11].includes(stepId) ? [] : 'student');
   reopenFrom(studentId, stepId);
   redirect(back(formData, { done: 'reopened' }));
 }
 
 export async function adminAddCourse(formData: FormData) {
-  const { studentId, p } = await load(formData);
+  const { me, studentId, p } = await load(formData);
   const termId = Number(formData.get('termId'));
   if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
   let courseId: number;
@@ -195,22 +274,24 @@ export async function adminAddCourse(formData: FormData) {
     courseId = Number(formData.get('courseId'));
     if (!db().prepare("SELECT 1 FROM courses WHERE id = ? AND active = 1 AND (kind = 'ce' OR (kind = 'de' AND school_id = ?))").get(courseId, p.school.id)) redirect(back(formData));
   }
-  addRequest(studentId, courseId, termId);
+  addRequest(studentId, courseId, termId, actorOf(me));
   redirect(back(formData, { done: 'course_added' }));
 }
 
 export async function adminRemoveCourse(formData: FormData) {
-  const { studentId } = await load(formData);
+  const { me, studentId } = await load(formData);
   const from = Number(formData.get('fromTermId')) || null;
+  logEvent(studentId, actorOf(me), `Removed ${courseName(Number(formData.get('courseId')))}`, null, [from]);
   db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?').run(studentId, Number(formData.get('courseId')), from);
   redirect(back(formData, { done: 'course_removed' }));
 }
 
 /** Move a student to another school: new counselor, and that school's step rules from here on. */
 export async function reassignSchool(formData: FormData) {
-  const { studentId, p } = await load(formData);
+  const { me, studentId, p } = await load(formData);
   const schoolId = Number(formData.get('schoolId'));
   if (!schoolId || schoolId === p.school.id || !db().prepare('SELECT 1 FROM schools WHERE id = ?').get(schoolId)) redirect(back(formData));
+  logEvent(studentId, actorOf(me), 'Moved to another high school', `${p.school.name} → ${(db().prepare('SELECT name FROM schools WHERE id = ?').get(schoolId) as { name: string }).name}`);
   moveStudentSchool(studentId, schoolId);
   redirect(back(formData, { done: 'moved_school' }));
 }
@@ -234,25 +315,29 @@ async function decideSchoolChange(formData: FormData, approve: boolean) {
     db().prepare('UPDATE users SET hs_approver_name = ?, hs_approver_email = ? WHERE id = ?').run(req!.approver_name, req!.approver_email, studentId);
   }
   db().prepare('UPDATE school_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req.id);
+  logEvent(studentId, actorOf(me), approve ? 'High school change approved' : 'High school change declined', (db().prepare('SELECT name FROM schools WHERE id = ?').get(req!.to_school_id) as { name: string } | undefined)?.name ?? null);
   redirect(back(formData, { done: approve ? 'school_change_approved' : 'school_change_declined' }));
 }
 
 /** Fix a student's Shasta College ID (e.g. when the same ID shows up on two accounts). */
 export async function setStudentNumber(formData: FormData) {
-  const { studentId } = await load(formData);
+  const { me, studentId, p } = await load(formData);
   const num = String(formData.get('student_number') || '').trim().slice(0, 20) || null;
   if (num && !/^[A-Za-z0-9-]+$/.test(num)) redirect(back(formData, { error: 'id' }));
+  if (num !== p.student.student_number) logEvent(studentId, actorOf(me), 'Shasta College ID changed', `${p.student.student_number ?? 'none'} → ${num ?? 'none'}`);
   db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, studentId);
   redirect(back(formData, { done: 'id_saved' }));
 }
 
 /** Change which term a requested class is in. */
 export async function adminSetCourseTerm(formData: FormData) {
-  const { studentId } = await load(formData);
+  const { me, studentId } = await load(formData);
   const termId = Number(formData.get('termId'));
   if (!db().prepare('SELECT 1 FROM terms WHERE id = ?').get(termId)) redirect(back(formData));
   const from = Number(formData.get('fromTermId')) || null;
   if (from === termId) redirect(back(formData));
+  const tn = (id: number | null) => (id ? (db().prepare('SELECT name FROM terms WHERE id = ?').get(id) as { name: string } | undefined)?.name : null) ?? 'no term';
+  logEvent(studentId, actorOf(me), `Moved ${courseName(Number(formData.get('courseId')))} to another term`, `${tn(from)} → ${tn(termId)}`, [from, termId]);
   // A class in a new term needs its own high school approval.
   db().prepare(`UPDATE OR IGNORE course_requests SET term_id = ?, hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL
     WHERE student_id = ? AND course_id = ? AND term_id IS ?`).run(termId, studentId, Number(formData.get('courseId')), from);
@@ -285,6 +370,7 @@ async function decideIdChange(formData: FormData, approve: boolean) {
     if (approve) db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(req!.new_number, studentId);
     db().prepare('UPDATE id_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req!.id);
   });
+  logEvent(studentId, actorOf(me), approve ? 'Shasta College ID change approved' : 'Shasta College ID change declined', `Requested ID ${req!.new_number}`);
   redirect(back(formData, { done: approve ? 'id_change_approved' : 'id_change_declined' }));
 }
 
@@ -305,6 +391,7 @@ export async function reviewAffidavit(formData: FormData) {
   if (decision === 'decline' && !note) redirect(back(formData, { error: 'note' }));
   db().prepare("UPDATE affidavits SET status = ?, reviewed_by = ?, reviewed_at = ?, note = ? WHERE id = (SELECT id FROM affidavits WHERE student_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1)")
     .run(decision === 'approve' ? 'approved' : 'declined', me.id, new Date().toISOString(), note || null, studentId);
+  logEvent(studentId, actorOf(me), decision === 'approve' ? 'Private School Affidavit approved' : 'Private School Affidavit declined', note || null);
   redirect(back(formData, { done: decision === 'approve' ? 'affidavit_ok' : 'affidavit_declined' }));
 }
 
@@ -313,6 +400,7 @@ export async function nudgePrerequisite(formData: FormData) {
   const { me, studentId, p, note } = await load(formData);
   if (p.steps.find((s) => s.id === 8)?.status !== 'in_review') redirect(back(formData));
   await nudgePrereq(studentId, { id: me.id, name: `${me.first_name} ${me.last_name}` }, note || null);
+  logEvent(studentId, actorOf(me), 'Nudged prerequisite review (prioritize)', note || null, p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => c.term_id));
   redirect(back(formData, { done: 'nudged' }));
 }
 
@@ -328,5 +416,6 @@ export async function adminFlagPrereq(formData: FormData) {
   db().prepare(`UPDATE course_requests SET prereq_flag = ?, prereq_flagged_by = ?, prereq_status = CASE WHEN ? = 1 THEN NULL ELSE prereq_status END,
     prereq_by = CASE WHEN ? = 1 THEN NULL ELSE prereq_by END, prereq_at = CASE WHEN ? = 1 THEN NULL ELSE prereq_at END
     WHERE student_id = ? AND course_id = ? AND term_id IS ?`).run(on ? 1 : 0, on ? me.id : null, on ? 1 : 0, on ? 1 : 0, on ? 1 : 0, studentId, courseId, termId);
+  logEvent(studentId, actorOf(me), on ? `Sent ${courseName(courseId)} to prerequisite review` : `Took ${courseName(courseId)} out of prerequisite review`, null, [termId]);
   redirect(back(formData, { done: on ? 'prereq_flagged' : 'prereq_unflagged' }));
 }

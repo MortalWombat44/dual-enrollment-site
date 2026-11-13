@@ -275,6 +275,32 @@ CREATE TABLE IF NOT EXISTS nudges (
   created_at TEXT NOT NULL,
   cleared_at TEXT
 );
+-- History per student (and per term): who requested, approved, cleared, moved steps, uploaded. Never edited.
+-- term_id is NULL for things that aren't about one term (parent consent, CCCApply, uploads).
+CREATE TABLE IF NOT EXISTS audit_events (
+  id INTEGER PRIMARY KEY,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  term_id INTEGER REFERENCES terms(id) ON DELETE SET NULL,
+  at TEXT NOT NULL,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  actor_name TEXT NOT NULL,   -- kept as written at the time, so it still reads right if the account changes
+  actor_role TEXT NOT NULL,   -- 'Student', 'Parent', 'High school staff', 'College admin', 'College counselor', ...
+  action TEXT NOT NULL,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS audit_events_student ON audit_events (student_id, at);
+-- Transcripts uploaded in bulk that couldn't be matched to one student for sure: staff confirm or pick the student.
+CREATE TABLE IF NOT EXISTS transcript_inbox (
+  id INTEGER PRIMARY KEY,
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  stored_name TEXT NOT NULL,
+  uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  uploaded_at TEXT NOT NULL,
+  suggested_student_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  match_note TEXT             -- why it's suggested (or why it couldn't be matched)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -343,6 +369,7 @@ export function db(): Db {
     if (count.n === 0) approveFromStepFour(conn);
     backfillRegistrations(conn);
     ensureHomeschool(conn);
+    backfillAudit(conn);
     _db = conn;
   }
   const conn = _db;
@@ -571,6 +598,59 @@ function backfillRegistrations(d: DatabaseSync) {
   d.exec("INSERT INTO settings (key, value) VALUES ('registrations_backfilled', '1')");
 }
 
+/**
+ * The history (audit_events) started after launch. Once, fill it from what earlier records already say:
+ * steps completed (and by whom, when known), high school approvals, prerequisite approvals, registrations.
+ */
+function backfillAudit(d: DatabaseSync) {
+  if (d.prepare("SELECT 1 FROM settings WHERE key = 'audit_backfilled'").get()) return;
+  const who = (id: number | null | undefined) => {
+    const u = id ? d.prepare('SELECT id, first_name, last_name, role, admin_level, is_college_counselor FROM users WHERE id = ?').get(id) as
+      { id: number; first_name: string; last_name: string; role: string; admin_level: string | null; is_college_counselor: number } | undefined : undefined;
+    if (!u) return { id: null, name: 'Unknown', role: 'Earlier record' };
+    const role = u.role === 'student' ? 'Student' : u.role === 'parent' ? 'Parent' : u.role === 'counselor' ? 'High school staff'
+      : u.is_college_counselor ? 'College counselor' : u.admin_level === 'super' ? 'Super admin' : 'College admin';
+    return { id: u.id, name: `${u.first_name} ${u.last_name}`, role };
+  };
+  const ins = d.prepare('INSERT INTO audit_events (student_id, term_id, at, actor_id, actor_name, actor_role, action, detail) VALUES (?,?,?,?,?,?,?,?)');
+  const add = (student: number, term: number | null, at: string, a: { id: number | null; name: string; role: string }, action: string, detail: string | null) =>
+    ins.run(student, term, at, a.id, a.name, a.role, action, detail);
+  const terms = (student: number) => (d.prepare('SELECT DISTINCT term_id FROM course_requests WHERE student_id = ? AND term_id IS NOT NULL AND archived_at IS NULL').all(student) as { term_id: number }[]).map((r) => r.term_id);
+  const names = new Map((d.prepare('SELECT id, name FROM steps').all() as { id: number; name: string }[]).map((r) => [r.id, r.name]));
+  d.exec('BEGIN');
+  try {
+    const rows = d.prepare("SELECT student_id, step_id, completed_at, data FROM step_progress WHERE status = 'complete' AND step_id NOT IN (4, 5, 8)").all() as
+      { student_id: number; step_id: number; completed_at: string; data: string | null }[];
+    for (const r of rows) {
+      const data = r.data ? JSON.parse(r.data) as Record<string, unknown> : {};
+      const actorId = (data.admin_id ?? data.parent_id ?? data.counselor_id ?? (r.step_id === 1 || r.step_id === 2 || r.step_id === 9 ? r.student_id : null)) as number | null;
+      const perTerm = [2, 7, 9, 10].includes(r.step_id);
+      const action = `${names.get(r.step_id) ?? `Step ${r.step_id}`} completed${data.override ? ' (marked complete by staff)' : ''}`;
+      // Parent consent without a parent account on record: the name they signed with.
+      const actor = r.step_id === 3 && !actorId && data.signer ? { id: null, name: String(data.signer), role: 'Parent' } : who(actorId);
+      for (const t of perTerm && terms(r.student_id).length ? terms(r.student_id) : [null]) add(r.student_id, t, r.completed_at, actor, action, 'From earlier records');
+    }
+    for (const r of d.prepare("SELECT r.student_id, r.term_id, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signer_email, c.code FROM course_requests r JOIN courses c ON c.id = r.course_id WHERE r.hs_status = 'approved' AND r.hs_at IS NOT NULL").all() as
+      { student_id: number; term_id: number | null; hs_by: number | null; hs_at: string; hs_signed_name: string | null; hs_signer_email: string | null; code: string }[]) {
+      const a = r.hs_by ? who(r.hs_by) : { id: null, name: r.hs_signed_name ?? 'High school approver', role: r.hs_signer_email ? `High school approver (${r.hs_signer_email})` : 'High school approver' };
+      add(r.student_id, r.term_id, r.hs_at, a, `High school approved ${r.code}`, 'From earlier records');
+    }
+    for (const r of d.prepare("SELECT r.student_id, r.term_id, r.prereq_by, r.prereq_at, c.code FROM course_requests r JOIN courses c ON c.id = r.course_id WHERE r.prereq_status = 'approved' AND r.prereq_at IS NOT NULL").all() as
+      { student_id: number; term_id: number | null; prereq_by: number | null; prereq_at: string; code: string }[]) {
+      add(r.student_id, r.term_id, r.prereq_at, who(r.prereq_by), `Prerequisite approved for ${r.code}`, 'From earlier records');
+    }
+    for (const r of d.prepare('SELECT g.student_id, g.term_id, g.registered_at, g.marked_by, t.name FROM registrations g JOIN terms t ON t.id = g.term_id').all() as
+      { student_id: number; term_id: number; registered_at: string; marked_by: number | null; name: string }[]) {
+      add(r.student_id, r.term_id, r.registered_at, who(r.marked_by ?? r.student_id), r.marked_by ? `Marked registered for ${r.name}` : `Confirmed registered for ${r.name}`, 'From earlier records');
+    }
+    d.exec("INSERT INTO settings (key, value) VALUES ('audit_backfilled', '1')");
+    d.exec('COMMIT');
+  } catch (e) {
+    d.exec('ROLLBACK');
+    throw e;
+  }
+}
+
 /** Tabitha Miller's account was seeded with a password in the code; it's been removed. Deletes it where it still exists. */
 function removeRetiredSeedAccounts(d: DatabaseSync) {
   const u = d.prepare("SELECT id FROM users WHERE email = 'tmiller@shastacollege.edu'").get() as { id: number } | undefined;
@@ -714,6 +794,16 @@ function migrate(d: DatabaseSync) {
         AND course_id IN (SELECT id FROM courses WHERE prerequisite IS NOT NULL)`);
   }
   if (!reqCols2.includes('hs_signer_email')) d.exec('ALTER TABLE course_requests ADD COLUMN hs_signer_email TEXT'); // outside approver (unlisted school)
+  // Prerequisite review "holds": a college counselor needs more information, or an appointment, before deciding.
+  if (!reqCols2.includes('prereq_hold')) {
+    d.exec("ALTER TABLE course_requests ADD COLUMN prereq_hold TEXT CHECK (prereq_hold IN ('info','appointment'))");
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_hold_note TEXT');
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_hold_by INTEGER');
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_hold_at TEXT');
+    // The student's latest answer to a hold (shown to the counselor until they decide).
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_reply TEXT');
+    d.exec('ALTER TABLE course_requests ADD COLUMN prereq_reply_at TEXT');
+  }
   if (!reqCols2.includes('archived_at')) {
     d.exec('ALTER TABLE course_requests ADD COLUMN archived_at TEXT');
     d.exec('ALTER TABLE course_requests ADD COLUMN archived_reason TEXT');

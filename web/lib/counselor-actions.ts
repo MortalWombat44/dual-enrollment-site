@@ -6,6 +6,8 @@ import { currentClassYear, getProgress, GRADES } from './workflow';
 import { applyHsDecisions } from './hs-approval';
 import { db, tx } from './db';
 import { saveFile, sniff } from './files';
+import { actorOf, logEvent } from './audit';
+import { addTranscript, readUpload } from './transcripts';
 
 async function guard(formData: FormData) {
   const me = await requireRole('counselor');
@@ -38,11 +40,12 @@ async function staffFor(formData: FormData) {
 
 /** High school staff: update a student's grade and graduation year (counts as this year's confirmation). */
 export async function staffSetGrade(formData: FormData) {
-  const { studentId, back } = await staffFor(formData);
+  const { me, studentId, back } = await staffFor(formData);
   const grade = Number(formData.get('grade'));
   const y = Number(formData.get('grad_year'));
   if (!GRADES.includes(grade) || !Number.isInteger(y) || y < 2000 || y > 2100) back('error=grade');
   db().prepare('UPDATE users SET grade = ?, grad_year = ?, grade_confirmed_year = ? WHERE id = ?').run(grade, y, currentClassYear(), studentId);
+  logEvent(studentId, actorOf(me), 'Grade and graduation year updated', `Grade ${grade}, class of ${y}`);
   back('done=grade');
 }
 
@@ -56,5 +59,15 @@ export async function requestIdChange(formData: FormData) {
   db().prepare("DELETE FROM id_change_requests WHERE student_id = ? AND status = 'open'").run(studentId);
   db().prepare('INSERT INTO id_change_requests (student_id, requested_by, current_number, new_number, note, created_at) VALUES (?,?,?,?,?,?)')
     .run(studentId, me.id, cur, num, note, new Date().toISOString());
+  logEvent(studentId, actorOf(me), 'Asked Shasta College to change the Shasta College ID', `${cur ?? 'none'} → ${num}${note ? ` · ${note}` : ''}`);
   back('done=id_request');
+}
+
+/** High school staff upload a transcript on the student's behalf (for Shasta College's prerequisite review). */
+export async function staffUploadTranscript(formData: FormData) {
+  const { me, studentId, back } = await staffFor(formData);
+  const f = await readUpload(formData.get('transcript'));
+  if ('error' in f) back(`error=tr_${f.error}`);
+  await addTranscript(studentId, { ...actorOf(me), id: me.id }, f as { buf: Buffer; mime: string; name: string }, 'Uploaded by high school staff');
+  back('done=transcript');
 }

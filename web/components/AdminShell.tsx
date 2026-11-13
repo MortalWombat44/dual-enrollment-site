@@ -1,13 +1,15 @@
 import { unreadCount } from '@/lib/notify';
+import { inboxCount } from '@/lib/transcripts';
 import Link from 'next/link';
 import type { User } from '@/lib/auth';
 import { logout } from '@/lib/session-actions';
 import { retireNudge } from '@/lib/retire';
 import { dismissRetireReminder } from '@/lib/admin-actions';
 
-export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'roster' | 'users' | 'schools' | 'courses' | 'terms' | 'audit' | 'files' | 'reports' | 'notifications'; children: React.ReactNode }) {
+export function AdminShell({ me, current, children }: { me: User; current: 'students' | 'transcripts' | 'roster' | 'users' | 'schools' | 'courses' | 'terms' | 'audit' | 'files' | 'reports' | 'notifications'; children: React.ReactNode }) {
   const isSuper = me.admin_level === 'super';
   const unread = unreadCount(me.id);
+  const inbox = inboxCount();
   // Each June, remind super admins to retire the class from 4 years ago.
   const nudge = isSuper ? retireNudge() : null;
   const link = (key: typeof current, href: string, label: string) => (
@@ -19,6 +21,7 @@ export function AdminShell({ me, current, children }: { me: User; current: 'stud
         <div className="admin-brand"><div /><div style={{ fontWeight: 800, fontSize: 15 }}>Shasta DE Admin</div></div>
         <nav className="admin-nav">
           {link('students', '/admin/students', 'Students')}
+          {link('transcripts', '/admin/transcripts', inbox ? `Transcripts · ${inbox} to match` : 'Transcripts')}
           {link('roster', '/admin/roster', 'Roster')}
           {isSuper && link('users', '/admin/users', 'Users')}
           {isSuper && link('schools', '/admin/schools', 'Schools')}

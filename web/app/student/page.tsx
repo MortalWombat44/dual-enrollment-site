@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
-import { getProgress, fmt, pad, displayName } from '@/lib/workflow';
+import { getProgress, fmt, pad, displayName, HOLD_LABEL } from '@/lib/workflow';
 import { dashboardLine, upNextLine, completionCopy } from '@/lib/stepcopy';
 import { TopBar, SegBar } from '@/components/chrome';
 import { StepGrid } from '@/components/StepGrid';
@@ -32,6 +32,12 @@ export default async function StudentDashboard({ searchParams }: { searchParams:
       {unseen.map((s) => (
         <Link key={s.id} href={`/student/steps/${s.id}/complete`} className="flash unlink" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span><strong>Step {pad(s.num)} complete.</strong> {completionCopy(p, s).poster}</span><span>See details →</span>
+        </Link>
+      ))}
+      {/* A college counselor put a prerequisite review on hold: the student has to act (it runs alongside College review, so it may not be "up next"). */}
+      {p.courses.filter((c) => c.prereq_hold && c.prereq_status !== 'approved').map((c) => (
+        <Link key={`hold-${c.id}-${c.term_id}`} href="/student/steps/8" className="flash unlink" data-hold={c.prereq_hold!} style={{ display: 'flex', justifyContent: 'space-between', background: '#fff4e0', color: '#8a4b00', borderBottomColor: '#d08a00' }}>
+          <span><strong>{HOLD_LABEL[c.prereq_hold!]}</strong> for {c.code} ({c.term_name ?? 'no term'}).{c.prereq_reply_at && c.prereq_hold === 'appointment' ? ' You replied; the counselor will follow up.' : ''}</span><span>See what to do →</span>
         </Link>
       ))}
       {p.requestTerms.filter((t) => t.is_current !== 1).map((t) => (

@@ -4,6 +4,7 @@ import { requireAdmin, requireRole } from './auth';
 import { canSeeStudent } from './access';
 import { db } from './db';
 import { raiseHelp } from './help';
+import { actorOf, logEvent } from './audit';
 
 const msg = (fd: FormData) => String(fd.get('message') || '').trim().replace(/\s+\n/g, '\n').slice(0, 1000);
 
@@ -14,6 +15,7 @@ export async function studentAskHelp(formData: FormData) {
   const m = msg(formData);
   if (m.length < 3) redirect(`${back}${back.includes('?') ? '&' : '?'}help=empty#help`);
   await raiseHelp(me.id, { id: me.id, role: 'student', name: `${me.first_name} ${me.last_name}` }, m);
+  logEvent(me.id, actorOf(me), 'Asked Shasta College for help', m);
   redirect(`${back}${back.includes('?') ? '&' : '?'}help=sent#help`);
 }
 
@@ -25,6 +27,7 @@ export async function staffFlagHelp(formData: FormData) {
   const m = msg(formData);
   if (m.length < 3) redirect(`/counselor?student=${studentId}&error=help`);
   await raiseHelp(studentId, { id: me.id, role: 'counselor', name: `${me.first_name} ${me.last_name}` }, m);
+  logEvent(studentId, actorOf(me), 'Flagged the student for Shasta College help', m);
   redirect(`/counselor?student=${studentId}&done=help`);
 }
 
@@ -35,6 +38,7 @@ export async function resolveHelp(formData: FormData) {
   const reply = String(formData.get('reply') || '').trim().slice(0, 1000) || null;
   const r = db().prepare("UPDATE help_requests SET status = 'resolved', resolved_by = ?, resolved_at = ?, reply = ? WHERE id = ? AND status = 'open'").run(me.id, new Date().toISOString(), reply, id);
   const sid = (db().prepare('SELECT student_id FROM help_requests WHERE id = ?').get(id) as { student_id: number } | undefined)?.student_id;
+  if (sid && Number(r.changes)) logEvent(sid, actorOf(me), 'Help request resolved', reply);
   const u = new URLSearchParams();
   for (const k of ['tab', 'school', 'term', 'q']) { const v = String(formData.get(k) || ''); if (v) u.set(k, v); }
   if (sid) u.set('student', String(sid));

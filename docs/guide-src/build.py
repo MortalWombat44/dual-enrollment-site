@@ -55,6 +55,7 @@ body.append('''
 <thead><tr><th style="width:28%">Menu item</th><th>Use it to</th></tr></thead>
 <tbody>
 <tr><td><strong>Students</strong></td><td>Work the review queues and open any student&rsquo;s record. This is your home page.</td></tr>
+<tr><td><strong>Transcripts</strong></td><td>Upload many transcripts at once; each is matched to a student by its file name. The menu shows how many are waiting for you to confirm the student.</td></tr>
 <tr><td><strong>Roster</strong></td><td>See who has selected each class at a school, by class or by teacher, and download a CSV.</td></tr>
 <tr><td><strong>Reports</strong></td><td>Your College review totals and wait times; the seniors&rsquo; plans export (college counselors and Super Admins).</td></tr>
 <tr><td><strong>Notifications</strong></td><td>Items sent to you: help requests, and young student or homeschool items if you are a lead. The menu shows how many are unread.</td></tr>
@@ -70,6 +71,7 @@ body.append('''
 <tr><td><strong>Overdue registration</strong> <span class="pill">when waiting</span></td><td>Students whose registration has been open more than 5 days without confirming.</td></tr>
 <tr><td><strong>College review</strong></td><td>Students waiting for Shasta College to check their classes and unit load.</td></tr>
 <tr><td><strong>Prerequisites</strong></td><td>Classes with a prerequisite, waiting for a college counselor.</td></tr>
+<tr><td><strong>Prerequisites · waiting on student</strong> <span class="pill">when waiting</span></td><td>Prerequisite reviews a counselor put on hold (more information or an appointment needed). They come back to <em>Prerequisites</em> when the student responds.</td></tr>
 <tr><td><strong>Young students</strong> <span class="pill">when waiting</span></td><td>Students in 8th grade and below waiting for a recommendation or decision.</td></tr>
 <tr><td><strong>Homeschool</strong> <span class="pill">when waiting</span></td><td>Private School Affidavits waiting for review.</td></tr>
 <tr><td><strong>School changes · ID changes · Shared IDs</strong></td><td>Requests to change a student&rsquo;s high school or Shasta College ID, and IDs that appear on more than one account.</td></tr>
@@ -143,10 +145,25 @@ body.append('<h3>Prerequisite review</h3><p>Only admins designated as <strong>co
 body.append(callout('info', 'Classes the student didn&rsquo;t mark', 'Under <em>Classes requested</em>, a class with no prerequisite shows &ldquo;No prerequisite selected&rdquo;. If you know it has one, click <strong>Needs prerequisite review</strong>: it goes into the Prerequisites queue right away, even after College review, and nothing else is reopened. Students can do the same from Course selection (&ldquo;Missed a prerequisite?&rdquo;).'))
 body.append(steps(
     'Open the <strong>Prerequisites</strong> tab and click a student.',
-    'For each class and term, choose <strong>Approve</strong> or <strong>Decline</strong>. Before approving, clear the student in NCWS and check <strong>Student cleared in NCWS</strong> (required to approve; recorded on the audit record).',
-    'Write a note if you decline anything (required), then <strong>Save decisions</strong>. Declined classes come off the request; if nothing is left, the student goes back to Course selection.',
+    'Open any <strong>Transcripts</strong> on the panel (new ones are marked <em>New</em>).',
+    'For each class and term, choose <strong>Approve</strong>, <strong>Decline</strong>, <strong>More info needed</strong> or <strong>Appointment required</strong>. Before approving, clear the student in NCWS and check <strong>Student cleared in NCWS</strong> (required to approve; recorded on the audit record).',
+    'Write a note: required to decline or to ask for more information (say exactly what you need; the student sees it). Then <strong>Save decisions</strong>. Declined classes come off the request; if nothing is left, the student goes back to Course selection.',
 ))
+body.append('''<h3>Putting a prerequisite on hold</h3>
+<table class="compact"><tbody>
+<tr><td style="width:30%"><strong>More info needed</strong></td><td>The student sees &ldquo;Prerequisite: More information needed&rdquo; with your note, on their dashboard and step, and can reply with a message, a transcript or both. Their reply, or any transcript uploaded for them (by the student, their high school or Shasta College), puts the class back in the Prerequisites queue and notifies you.</td></tr>
+<tr><td><strong>Appointment required</strong></td><td>The student sees &ldquo;Prerequisite: Appointment with a college counselor required&rdquo; and is told to book one. They can send a message (for example, the date); it stays on hold. After the appointment, decide the class, or click <strong>Appointment done: back to queue</strong>.</td></tr>
+</tbody></table>
+<p>Held classes move from <em>Prerequisites</em> to <em>Prerequisites &middot; waiting on student</em>. Any admin can click <strong>Back to queue</strong> on a held class. Students get an email about the hold when email is set up.</p>''')
 body.append(callout('tip', 'Not a college counselor? Nudge it', 'Any College Admin can open a prerequisite review and read it. To speed one up, click <strong>Nudge</strong> on the student (optionally say why it&rsquo;s urgent). College counselors with that school as a primary school are notified, or every college counselor if none has it, and the student moves to the top of the Prerequisites queue, highlighted red, until a counselor decides.'))
+body.append('''<h3>Transcripts</h3>
+<p>Transcripts support prerequisite review. Students can send one from their Prerequisite review step; their High School Staff can upload one from their student panel; and you can upload one under <strong>Transcripts</strong> on any student&rsquo;s panel. Each upload is recorded in the student&rsquo;s history with who added it.</p>
+<p><strong>Bulk upload</strong> (menu &rarr; <em>Transcripts</em>): choose many files at once. Each is matched by its <strong>file name</strong>:</p>
+<ul class="ticks">
+<li>A <strong>Shasta College ID</strong> that is on exactly one account (e.g. <em>0412345_transcript.pdf</em>) is added to that student right away.</li>
+<li>Otherwise, a <strong>first and last name</strong> that exactly one student has (e.g. <em>Rivera_Maya.pdf</em>) is added right away.</li>
+<li>Everything else waits under <strong>Needs a match</strong> with the closest student suggested (a name spelled a little differently, or an ID one character off). Click <em>Add to &hellip;</em> to confirm, pick another student by name or ID, or delete the file.</li>
+</ul>''')
 body.append('<h3>Young student review</h3><p>Students in 8th grade and below send a recent report card or transcript and a letter from their principal describing how the student will benefit from the specific class. Two different people review them.</p>')
 body.append(fig(D.young(), 'Figure 3. Young student review: recommendation, then a separate decision.'))
 body.append(steps(
@@ -184,6 +201,7 @@ body.append('''<p>Click any student to open their panel. From top to bottom it s
 <tr><td><strong>Steps</strong></td><td>Every step with its status, and <em>Mark complete</em> or <em>Move back</em>.</td></tr>
 <tr><td><strong>Classes requested</strong></td><td>Move a class to another term, remove it, request a Dual Enrollment class, or type in a Concurrent class for the student.</td></tr>
 <tr><td><strong>Grade, school, ID, documents</strong></td><td>Correct grade, graduation year, school or Shasta College ID; open the parent consent and audit record.</td></tr>
+<tr><td><strong>History</strong></td><td>Who did what and when, grouped by term: who requested each class, high school approvals, prerequisite decisions and holds, College review, steps moved forward or back, transcripts and uploads. Things not tied to a term (consent, CCCApply, ID changes) are under <em>All terms</em>. The audit PDF includes the same history.</td></tr>
 </tbody></table>
 <h3>Moving steps forward or back</h3>
 <p>Use these to correct a record, for example when consent is on paper in the office.</p>
@@ -270,7 +288,7 @@ body.append('''
 <tr><td><strong>Schools</strong></td><td>Add schools; set CCAP or Non-CCAP (this decides high school approval) and CCAP agreement details; set which steps are required or optional; edit each school&rsquo;s Dual Enrollment course list, including period, teacher and the term a section is offered.</td></tr>
 <tr><td><strong>Courses</strong></td><td>Upload a school&rsquo;s Dual Enrollment courses for a term from a CSV or Excel file. Download the template, fill in one row per section (Code, Title, Units; optional Period, Teacher, Prerequisite), choose the school and term, and upload. Every row is checked first; nothing is imported if any row has a problem. Also keep the <strong>Concurrent Enrollment list</strong>: listed classes appear as checkboxes for every student (a prerequisite here sends the class to review automatically). Students can still type in any class that isn&rsquo;t listed.</td></tr>
 <tr><td><strong>Terms</strong></td><td>Add terms, set registration dates, mark summer terms, and turn registration on or off (which archives unregistered requests; see chapter 9).</td></tr>
-<tr><td><strong>Audit</strong></td><td>Paste Shasta College IDs, pick terms, and download one PDF with each student&rsquo;s consent, course requests, approvals and signatures.</td></tr>
+<tr><td><strong>Audit</strong></td><td>Paste Shasta College IDs, pick terms, and download one PDF with each student&rsquo;s consent, course requests, approvals, signatures and history for those terms.</td></tr>
 </tbody></table>
 <h3>Student files: export, then delete</h3>
 <p>Files are grouped by graduating class. The ZIP has a folder for each student with their record as a PDF and their stored files, plus an <em>index.csv</em>. Deleting is only offered after a ZIP that includes the class&rsquo;s newest file has been downloaded, and it waits ten minutes so a mistake can be undone.</p>''')

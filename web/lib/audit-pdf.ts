@@ -4,6 +4,9 @@ import { db } from './db';
 import { getFile, readFile } from './files';
 import { archivedRequests, classLabel, isAdult, fmt, getProgress, getTerm, type StudentProgress, type Term } from './workflow';
 import { unitLimit } from './constants';
+import { HOLD_LABEL } from './workflow';
+import { studentHistory } from './audit';
+import { transcriptsFor } from './transcripts';
 
 const W = 612, H = 792, M = 54; // US Letter, 0.75" margins
 const INK = rgb(0.125, 0.118, 0.114), MUTED = rgb(0.4, 0.4, 0.4), GREEN = rgb(0.059, 0.42, 0.263);
@@ -197,6 +200,23 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
   if (pr) {
     w.text(pr.status === 'complete' ? `Prerequisite review: by ${fullName(person(pd.admin_id))} on ${when(pr.completedAt)}${pd.ncws_cleared ? '; student cleared in NCWS' : ''}.` : 'Prerequisite review: not yet reviewed.');
     for (const d of pd.decisions ?? []) w.text(`${d.code}${d.term ? ` (${d.term})` : ''}: ${d.decision}`, { size: 9, x: M + 14 });
+    for (const c of p.courses.filter((c) => c.prereq_hold && c.prereq_status !== 'approved' && (!termIds.length || (c.term_id && termIds.includes(c.term_id))))) {
+      w.text(`${c.code} (${c.term_name ?? 'no term'}): on hold, ${HOLD_LABEL[c.prereq_hold!].replace('Prerequisite: ', '').toLowerCase()}, set by ${fullName(person(c.prereq_hold_by))} on ${when(c.prereq_hold_at)}${c.prereq_hold_note ? ` (“${c.prereq_hold_note}”)` : ''}.`, { size: 9, x: M + 14 });
+    }
+  }
+  const tr = transcriptsFor(p.student.id);
+  if (tr.length) w.text(`Transcripts on file: ${tr.map((t) => `${t.filename} (${fmt(t.created_at, 'mdy')}, ${t.by_name ?? 'unknown'})`).join('; ')}.`, { size: 9 });
+
+  // History: who did what, when, for the selected terms (plus account-wide events).
+  w.heading(`History${termIds.length ? '' : ' (all terms)'}`);
+  const hist = studentHistory(p.student.id, termIds.length ? termIds : undefined);
+  if (!hist.length) w.text('Nothing recorded.');
+  for (const g of hist) {
+    w.text(g.termName, { bold: true, size: 10, gap: 4 });
+    for (const e of [...g.events].reverse()) {
+      w.text(`${when(e.at)} · ${e.actor_name} (${e.actor_role}) · ${e.action}${e.detail ? `. ${e.detail}` : ''}`, { size: 8.5, x: M + 14, gap: 1 });
+    }
+    w.y -= 4;
   }
 
   // Uploaded consent form, appended as-is.

@@ -6,7 +6,7 @@ import { fmt } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
-const KIND: Record<string, string> = { young: 'Young student', homeschool: 'Homeschool', help: 'Help request', nudge: 'Nudge' };
+const KIND: Record<string, string> = { young: 'Young student', homeschool: 'Homeschool', help: 'Help request', nudge: 'Nudge', prereq: 'Prerequisite', transcript: 'Transcripts' };
 
 /** An admin's notifications: young student and homeschool items (for leads) and students' help requests. */
 export default async function Notifications() {

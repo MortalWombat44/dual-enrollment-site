@@ -4,7 +4,7 @@ import { requireRole } from '@/lib/auth';
 import { activeTerms, archivedRequests, latestAffidavit, CE_DEFAULT_TITLE, displayName, fmt, getProgress, pad, schoolCourses, type StudentProgress, type StudentStep } from '@/lib/workflow';
 import { TermCourses } from '@/components/TermCourses';
 import { completionCopy, stepTag } from '@/lib/stepcopy';
-import { addMoreClasses, addStudentId, studentRequestPrereq, submitAffidavit, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
+import { addMoreClasses, addStudentId, studentAnswerHold, studentUploadTranscript, studentRequestPrereq, submitAffidavit, reopenCourseSelection, submitYoungDocs, submitCccapply, submitCourses, confirmRegistered, finishTextbooks } from '@/lib/student-actions';
 import { StudentIdForm } from '@/components/StudentIdForm';
 import { unitLimit } from '@/lib/constants';
 import { CoursePicker } from '@/components/CoursePicker';
@@ -15,6 +15,9 @@ import { studentSendApproverLink } from '@/lib/approver-actions';
 import { PacketTable } from '@/components/PacketTable';
 import { ParentInvite } from '@/components/ParentInvite';
 import { logout } from '@/lib/session-actions';
+import { HOLD_LABEL } from '@/lib/workflow';
+import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
+import { COUNSELING_APPOINTMENT_URL } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,12 +28,14 @@ const ERRORS: Record<string, string> = {
   aff_file: AFFIDAVIT_ERRORS.file, aff_size: AFFIDAVIT_ERRORS.size, aff_type: AFFIDAVIT_ERRORS.type,
   docs: 'Attach both documents (PDF, JPG or PNG, up to 10 MB each).',
   ce: 'Each concurrent class needs a course code (like PSYC C1000) and units (for example 3 or 4).',
+  tr_file: TRANSCRIPT_ERRORS.file, tr_size: TRANSCRIPT_ERRORS.size, tr_type: TRANSCRIPT_ERRORS.type,
+  reply: 'Write a message or attach a transcript.',
 };
 
-export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string; approver_link?: string; emailed?: string; help?: string; prereq?: string }> }) {
+export default async function StepPage({ params, searchParams }: { params: Promise<{ n: string }>; searchParams: Promise<{ error?: string; invited?: string; invite_error?: string; added?: string; approver_link?: string; emailed?: string; help?: string; prereq?: string; sent?: string }> }) {
   const me = await requireRole('student');
   const { n } = await params;
-  const { error, invited, invite_error, added, approver_link, emailed, help, prereq } = await searchParams;
+  const { error, invited, invite_error, added, approver_link, emailed, help, prereq, sent } = await searchParams;
   const p = getProgress(me.id);
   const s = p?.steps.find((x) => x.id === Number(n));
   if (!p || !s) notFound();
@@ -40,7 +45,7 @@ export default async function StepPage({ params, searchParams }: { params: Promi
     <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: '100vh', maxWidth: 1280, margin: '0 auto', boxShadow: '0 1px 3px rgba(0,0,0,.08)' }}>
       <Sidebar p={p} current={s.id} />
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} prereq={prereq} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} approverLink={approver_link} emailed={emailed === '1'} />}
+        {s.status === 'complete' ? <CompleteView p={p} s={s} error={error ? ERRORS[error] : undefined} added={added} prereq={prereq} /> : <OpenView p={p} s={s} error={error ? ERRORS[error] : undefined} invited={Number(invited) || undefined} inviteError={invite_error} approverLink={approver_link} emailed={emailed === '1'} sent={sent} />}
         <HelpBox studentId={p.student.id} back={`/student/steps/${s.id}`} status={help} />
         <div className="pad-sm" style={{ marginTop: 'auto', borderTop: '2px solid var(--color-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 48px', gap: 12, flexWrap: 'wrap' }}>
           {s.id === 3 && s.status === 'complete' ? (
@@ -228,7 +233,7 @@ function MoreClasses({ p, error, added, prereq }: { p: StudentProgress; error?: 
   );
 }
 
-function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string; approverLink?: string; emailed?: boolean }) {
+function OpenView({ p, s, error, invited, inviteError, approverLink, emailed, sent }: { p: StudentProgress; s: StudentStep; error?: string; invited?: number; inviteError?: string; approverLink?: string; emailed?: boolean; sent?: string }) {
   const tag = stepTag(s)!;
   const counselor = 'Your high school'; // no staff names for students
   // Course selection only changes classes in terms that are open for registration; the rest are kept as they are.
@@ -242,6 +247,7 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: 
     s.status === 'scheduled' ? `You're ready to register. Registration for ${p.term.name} opens ${fmt(p.term.registration_opens, 'wmd')} at ${fmt(p.term.registration_opens, 'time')}.` :
     s.status === 'in_review' ? (
       s.id === 7 ? 'Shasta College is checking your courses and unit load. Usually 1–2 days.' :
+      s.id === 8 && s.hold ? (s.hold === 'info' ? 'A Shasta College counselor needs more information before deciding. See what to send below.' : 'A Shasta College counselor needs to meet with you before deciding. See how below.') :
       s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
       s.id === 10 ? 'A Shasta College counselor is reviewing your documents, then Shasta College makes the final decision.' :
       s.id === 11 ? 'Shasta College is reviewing your Private School Affidavit.' :
@@ -309,6 +315,7 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: 
             <form action={studentSendApproverLink}><button className="btn btn-secondary">{approverLink ? 'Make a new link' : `Send approval link to ${p.student.hs_approver_name}`}</button></form>
           </div>
         )}
+        {s.id === 8 && s.status === 'in_review' && <PrereqHolds p={p} sent={sent} />}
         {s.id === 11 && s.status === 'current' && (
           <AffidavitUpload action={submitAffidavit} declinedNote={latestAffidavit(p.student.id)?.status === 'declined' ? latestAffidavit(p.student.id)?.note : null} />
         )}
@@ -367,3 +374,53 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed }: 
   );
 }
 
+
+/** Prerequisite review: classes a counselor put on hold (with what to do), and sending a transcript. */
+function PrereqHolds({ p, sent }: { p: StudentProgress; sent?: string }) {
+  const held = p.courses.filter((c) => c.prereq_hold && c.prereq_status !== 'approved');
+  const files = transcriptsFor(p.student.id);
+  const accept = '.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {sent === 'info' && <div className="flash" role="status">Sent. Your prerequisite review is back with the counselor.</div>}
+      {sent === 'appointment' && <div className="flash" role="status">Sent to the counselor. They&apos;ll decide after your appointment.</div>}
+      {sent === 'transcript' && <div className="flash" role="status">Transcript sent to Shasta College.</div>}
+      {held.map((c) => (
+        <form key={`${c.id}-${c.term_id}`} action={studentAnswerHold} data-hold-form={c.code} style={{ display: 'flex', flexDirection: 'column', gap: 12, borderLeft: '4px solid #d08a00', background: '#fff4e0', padding: '16px 20px' }}>
+          <input type="hidden" name="courseId" value={c.id} />
+          <input type="hidden" name="termId" value={c.term_id ?? ''} />
+          <div className="kicker-sm" style={{ color: '#8a4b00' }}>{HOLD_LABEL[c.prereq_hold!]}</div>
+          <div style={{ fontSize: 15 }}><strong>{c.code}</strong> · {c.title} · {c.term_name ?? 'No term'}</div>
+          {c.prereq_hold_note && <div style={{ fontSize: 15 }}>Counselor&apos;s note: “{c.prereq_hold_note}”</div>}
+          {c.prereq_hold === 'appointment' ? (
+            <div style={{ fontSize: 15 }}>
+              Make an appointment with a Shasta College counselor{COUNSELING_APPOINTMENT_URL ? <> (<a href={COUNSELING_APPOINTMENT_URL} target="_blank" rel="noreferrer">book it here</a>)</> : ' by contacting Shasta College Counseling'}.
+              {' '}The counselor decides after you meet. You can let them know when your appointment is below.
+            </div>
+          ) : (
+            <div style={{ fontSize: 15 }}>Send what the counselor asked for: a message, a transcript, or both. It goes back to the counselor right away.</div>
+          )}
+          {c.prereq_reply && <div className="ink60" style={{ fontSize: 13 }}>You wrote on {fmt(c.prereq_reply_at)}: “{c.prereq_reply}”</div>}
+          <div className="field"><label htmlFor={`reply-${c.id}-${c.term_id}`}>{c.prereq_hold === 'appointment' ? 'Message to the counselor (for example, your appointment date)' : 'Message to the counselor'}</label>
+            <textarea id={`reply-${c.id}-${c.term_id}`} name="reply" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} /></div>
+          <div className="field"><label htmlFor={`tr-${c.id}-${c.term_id}`}>Transcript (optional; PDF, JPG or PNG, up to 10 MB)</label>
+            <input id={`tr-${c.id}-${c.term_id}`} name="transcript" type="file" accept={accept} className="input" /></div>
+          <div><button className="btn btn-primary">Send to the counselor <span>→</span></button></div>
+        </form>
+      ))}
+      <form action={studentUploadTranscript} style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: held.length ? '2px solid var(--color-divider)' : undefined, paddingTop: held.length ? 16 : 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>Transcripts</div>
+        <div className="ink60" style={{ fontSize: 13 }}>A transcript helps the counselor check your prerequisites. Your high school or Shasta College may also add one for you.</div>
+        {files.length > 0 && (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
+            {files.map((f) => <li key={f.id}><a href={`/files/${f.id}`} target="_blank" rel="noreferrer">{f.filename}</a> <span className="ink60">· added {fmt(f.created_at)}{f.by_role === 'student' ? '' : ' by staff'}</span></li>)}
+          </ul>
+        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input name="transcript" type="file" accept={accept} required className="input" aria-label="Transcript file" style={{ maxWidth: 360 }} />
+          <button className="btn btn-secondary">Send transcript</button>
+        </div>
+      </form>
+    </div>
+  );
+}

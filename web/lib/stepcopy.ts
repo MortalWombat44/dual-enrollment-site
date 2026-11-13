@@ -16,6 +16,7 @@ export function stepSub(p: StudentProgress, s: StudentStep): string {
       if (s.id === 7) return `Cleared ${fmt(s.completedAt)}`;
       return fmt(s.completedAt);
     case 'in_review':
+      if (s.id === 8 && s.hold) return s.hold === 'info' ? 'Action needed: send more information' : 'Action needed: see a college counselor';
       return s.id === 4 ? counselor : s.id === 8 ? 'College counselor' : 'Shasta College';
     case 'waiting_parent':
       return p.parents.length ? parent : 'Invite your parent';
@@ -36,7 +37,7 @@ export function stepSub(p: StudentProgress, s: StudentStep): string {
 export function stepTag(s: StudentStep): { label: string; kind: 'accent' | 'outline' | 'neutral' } | null {
   switch (s.status) {
     case 'complete': return null;
-    case 'in_review': return { label: 'In review', kind: 'accent' };
+    case 'in_review': return s.id === 8 && s.hold ? { label: 'Action needed', kind: 'accent' } : { label: 'In review', kind: 'accent' };
     case 'waiting_parent': return { label: 'Waiting on parent', kind: 'accent' };
     case 'changes': return { label: 'Changes requested', kind: 'accent' };
     case 'current':
@@ -61,6 +62,7 @@ export function dashboardLine(p: StudentProgress): string {
   switch (n.status) {
     case 'in_review':
       if (n.id === 7) return 'Your high school approved your plan. Shasta College is checking your units now.';
+      if (n.id === 8 && n.hold) return n.hold === 'info' ? 'A Shasta College counselor needs more information about a prerequisite. See what to send.' : 'A Shasta College counselor needs you to make an appointment about a prerequisite.';
       if (n.id === 8) return 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.';
       if (n.id === 10) return 'Shasta College is reviewing your report card and principal letter.';
       if (n.id === 11) return 'Shasta College is reviewing your Private School Affidavit.';
@@ -89,7 +91,8 @@ export function upNextLine(p: StudentProgress, s: StudentStep): string {
         ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online.`
         : `${displayName(p.parents[0])} hasn't accepted your invite yet.`;
     case 7: return `Shasta College is checking that ${list} fit your unit limit. Usually 1–2 days.`;
-    case 8: return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => c.code).join(', ') || 'your classes'}.`;
+    case 8: if (s.hold) return s.hold === 'info' ? 'A college counselor needs more information before deciding. Open this step to see what to send.' : 'A college counselor needs to meet with you before deciding. Open this step to see how.';
+      return `A college counselor is checking prerequisites for ${p.courses.filter((c) => c.needs_prereq && c.prereq_status !== 'approved').map((c) => c.code).join(', ') || 'your classes'}.`;
     case 11: return s.status === 'in_review' ? 'Shasta College is reviewing your Private School Affidavit.' : 'Upload the Private School Affidavit (you or your parent). Shasta College reviews it.';
     case 9: return 'Students in 8th grade and below send a recent report card or transcript and a letter from their principal.';
     case 10: return `A Shasta College counselor reviews your documents for ${list}, then Shasta College makes the final decision.`;

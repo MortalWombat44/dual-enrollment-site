@@ -1,6 +1,7 @@
 import 'server-only';
 import { db, DEFAULT_MODES, STEP_DEFS, STEP_ORDER, sweepYoungDocs, tx } from './db';
 import type { User } from './auth';
+import { logEvent, SYSTEM, type Actor } from './audit';
 
 export type Mode = 'required' | 'optional' | 'off';
 export type StepStatus =
@@ -39,7 +40,16 @@ export type RequestedCourse = Course & {
   hs_status: 'pending' | 'approved'; hs_by: number | null; hs_at: string | null;
   hs_signed_name: string | null; hs_signature_file_id: number | null; hs_sign_method: string | null; hs_signer_email: string | null;
   /** Needs prerequisite review: the course has a prerequisite, or the class was flagged later (prereq_flag). */
-  needs_prereq: number; prereq_flag: number; prereq_status: 'approved' | null; prereq_at: string | null;
+  needs_prereq: number; prereq_flag: number; prereq_status: 'approved' | null; prereq_at: string | null; prereq_by: number | null;
+  /** A college counselor put this class's prerequisite review on hold until the student responds. */
+  prereq_hold: PrereqHold | null; prereq_hold_note: string | null; prereq_hold_by: number | null; prereq_hold_at: string | null;
+  /** The student's latest answer to a hold. */
+  prereq_reply: string | null; prereq_reply_at: string | null;
+};
+export type PrereqHold = 'info' | 'appointment';
+export const HOLD_LABEL: Record<PrereqHold, string> = {
+  info: 'Prerequisite: More information needed',
+  appointment: 'Prerequisite: Appointment with a college counselor required',
 };
 
 /** CCAP schools never use high school approval; Non-CCAP schools always do (per class, per term). */
@@ -51,13 +61,14 @@ export function stepStatusLabel(s: StudentStep): string {
   if (s.id === 5 && s.overdue) return 'Overdue registration';
   if (s.id === 5 && s.status === 'scheduled') return 'Ready to register';
   if (s.id === 5 && s.status === 'current') return 'Registration open';
+  if (s.id === 8 && s.hold) return s.hold === 'info' ? 'More information needed' : 'Counselor appointment required';
   return { complete: 'Done', in_review: 'In review', waiting_parent: 'Waiting on parent', changes: 'Changes requested', locked: 'Locked', scheduled: 'Not open yet', current: 'Student to do' }[s.status];
 }
 /** "06 Register", "06 Overdue registration", "06 Ready to register": the step a student is on, for lists. */
 export function stepOnLabel(p: { next: StudentStep | null }): string {
   const n = p.next;
   if (!n) return 'Done';
-  const name = n.id === 5 && (n.overdue || n.status === 'scheduled') ? stepStatusLabel(n) : n.short;
+  const name = n.id === 5 && (n.overdue || n.status === 'scheduled') ? stepStatusLabel(n) : n.id === 8 && n.hold ? HOLD_LABEL[n.hold] : n.short;
   return `${String(n.num).padStart(2, '0')} ${name}`;
 }
 
@@ -82,6 +93,8 @@ export type StudentStep = {
   seen: boolean;
   /** Register for classes: open for more than 5 days without the student confirming ("Overdue registration"). */
   overdue?: boolean;
+  /** Prerequisite review: every class left is on hold, waiting on the student (not the counselor). */
+  hold?: PrereqHold;
 };
 
 export type StudentProgress = {
@@ -201,7 +214,8 @@ export function getProgress(studentId: number): StudentProgress | null {
   const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;
   const courses = d
     .prepare(`SELECT c.*, r.term_id, t.name AS term_name, r.hs_status, r.hs_by, r.hs_at, r.hs_signed_name, r.hs_signature_file_id, r.hs_sign_method, r.hs_signer_email,
-                     (c.prerequisite IS NOT NULL OR r.prereq_flag = 1) AS needs_prereq, r.prereq_flag, r.prereq_status, r.prereq_at
+                     (c.prerequisite IS NOT NULL OR r.prereq_flag = 1) AS needs_prereq, r.prereq_flag, r.prereq_status, r.prereq_at, r.prereq_by,
+                     r.prereq_hold, r.prereq_hold_note, r.prereq_hold_by, r.prereq_hold_at, r.prereq_reply, r.prereq_reply_at
               FROM course_requests r JOIN courses c ON c.id = r.course_id
               LEFT JOIN terms t ON t.id = r.term_id WHERE r.student_id = ? AND r.archived_at IS NULL ORDER BY t.registration_opens, c.code`)
     .all(studentId) as RequestedCourse[];
@@ -224,6 +238,10 @@ export function getProgress(studentId: number): StudentProgress | null {
   const prereqClasses = courses.filter((c) => c.needs_prereq);
   const needsPrereq = prereqClasses.length > 0 || (prog.has(8) && prog.get(8)!.status === 'complete');
   const prereqDone = prereqClasses.length ? prereqClasses.every((c) => c.prereq_status === 'approved') : prog.get(8)?.status === 'complete';
+  // On hold: every class still waiting is on hold, so it's the student's move (not the counselor's).
+  const prereqLeft = prereqClasses.filter((c) => c.prereq_status !== 'approved');
+  const prereqHold: PrereqHold | undefined = prereqLeft.length && prereqLeft.every((c) => c.prereq_hold)
+    ? (prereqLeft.some((c) => c.prereq_hold === 'info') ? 'info' : 'appointment') : undefined;
   const prereqAt = prereqClasses.length && prereqDone ? prereqClasses.map((c) => c.prereq_at ?? '').sort().at(-1) || prog.get(8)?.completed_at || null : prog.get(8)?.completed_at ?? null;
   const young = isYoung(student);
   const adult = isAdult(student);
@@ -272,7 +290,7 @@ export function getProgress(studentId: number): StudentProgress | null {
       overdue = Date.now() - new Date(ready).getTime() > REGISTER_GRACE_DAYS * 864e5;
     }
     if (!isComplete && mode === 'required') blocked = true;
-    steps.push({ overdue,
+    steps.push({ overdue, hold: def.id === 8 && status === 'in_review' ? prereqHold : undefined,
       id: def.id, num: steps.length + 1, name: def.name, short: def.short, description: def.description,
       mode, status, completedAt: isComplete ? (def.id === 4 ? hsAt : def.id === 8 ? prereqAt : def.id === 11 ? affidavit!.reviewed_at : def.id === 5 ? lastReg!.registered_at : autoCleared ? maxAt : p!.completed_at) : null,
       data: def.id === 11 ? (affidavit ? { ...affidavit } : null) : def.id === 5 ? (isComplete ? { crns: lastReg!.crns } : null) : autoCleared ? { max_units: true, admin_id: maxCleared.get(courses[0].term_id!)!.cleared_by } : isComplete && p?.data ? JSON.parse(p.data) : null,
@@ -310,11 +328,23 @@ export function maxUnitTerms(studentId: number): string[] {
  * Add a class request. If the same class + term was archived earlier (registration was turned off), it comes back
  * as a new, pending request.
  */
-export function addRequest(studentId: number, courseId: number, termId: number) {
+export function addRequest(studentId: number, courseId: number, termId: number, by?: Actor): boolean {
+  const prev = db().prepare('SELECT archived_at FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?').get(studentId, courseId, termId) as { archived_at: string | null } | undefined;
   db().prepare(`INSERT INTO course_requests (student_id, course_id, term_id) VALUES (?,?,?)
     ON CONFLICT (student_id, course_id, term_id) DO UPDATE SET archived_at = NULL, archived_reason = NULL,
-      hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL
+      hs_status = 'pending', hs_by = NULL, hs_at = NULL, hs_signed_name = NULL, hs_signature_file_id = NULL, hs_sign_method = NULL,
+      prereq_status = NULL, prereq_by = NULL, prereq_at = NULL, prereq_hold = NULL, prereq_hold_note = NULL, prereq_hold_by = NULL, prereq_hold_at = NULL,
+      prereq_reply = NULL, prereq_reply_at = NULL
     WHERE archived_at IS NOT NULL`).run(studentId, courseId, termId);
+  const added = !prev || !!prev.archived_at;
+  if (added && by) logEvent(studentId, by, `Requested ${courseName(courseId)}`, prev ? 'Requested again after it was archived' : null, [termId]);
+  return added;
+}
+
+/** "ENGL C1000 (3 units)" for the history. */
+export function courseName(courseId: number): string {
+  const c = db().prepare('SELECT code, units FROM courses WHERE id = ?').get(courseId) as { code: string; units: number } | undefined;
+  return c ? `${c.code} (${c.units} units)` : `class #${courseId}`;
 }
 
 /** Requests archived because registration for their term was turned off before the student registered. Staff only. */
@@ -332,7 +362,10 @@ export function archiveClosedTerm(termId: number) {
   const at = now();
   const affected = (d.prepare(`SELECT DISTINCT student_id FROM course_requests r WHERE term_id = ? AND archived_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM registrations g WHERE g.student_id = r.student_id AND g.term_id = r.term_id)`).all(termId) as { student_id: number }[]).map((r) => r.student_id);
+  const archiving = d.prepare(`SELECT r.student_id, c.code FROM course_requests r JOIN courses c ON c.id = r.course_id WHERE r.term_id = ? AND r.archived_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM registrations g WHERE g.student_id = r.student_id AND g.term_id = r.term_id)`).all(termId) as { student_id: number; code: string }[];
   const n = tx(() => {
+    for (const id of affected) logEvent(id, SYSTEM, `Archived ${archiving.filter((r) => r.student_id === id).map((r) => r.code).join(', ')}`, `Registration for ${t.name} was turned off before the student registered.`, [termId]);
     const changes = Number(d.prepare(`UPDATE course_requests SET archived_at = ?, archived_reason = ?
       WHERE term_id = ? AND archived_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM registrations g WHERE g.student_id = course_requests.student_id AND g.term_id = course_requests.term_id)`)

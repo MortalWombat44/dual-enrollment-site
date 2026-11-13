@@ -2,6 +2,8 @@ import 'server-only';
 import { db, tx } from './db';
 import { saveFile, sniff } from './files';
 import { completeStep, getProgress, requestChanges } from './workflow';
+import { actorOf, logEvent, type Actor } from './audit';
+import type { User } from './auth';
 
 export type Signer = {
   /** High school staff account id; null for an outside approver (unlisted school) using an emailed link. */
@@ -53,6 +55,11 @@ export function applyHsDecisions(studentId: number, formData: FormData, signer: 
     const del = db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?');
     for (const c of declined) del.run(studentId, c.id, c.term_id);
   });
+  // History: who approved or declined each class.
+  const u = signer.id ? db().prepare('SELECT * FROM users WHERE id = ?').get(signer.id) as User | undefined : undefined;
+  const who: Actor = u ? actorOf(u) : { id: null, name: signedName, role: `High school approver (${signer.email ?? 'by link'})` };
+  for (const c of approved) logEvent(studentId, who, `High school approved ${c.code}`, `Signed by ${signedName} (${method})`, [c.term_id]);
+  for (const c of declined) logEvent(studentId, who, `High school declined ${c.code}; class removed`, note, [c.term_id]);
   if (declined.length) {
     requestChanges(studentId, 4, { id: signer.id }, `${declined.map((c) => `${c.code} (${c.term_name ?? 'no term'})`).join(', ')} not approved: ${note}`);
     return 'changes';

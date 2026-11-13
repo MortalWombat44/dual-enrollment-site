@@ -11,6 +11,10 @@ import { saveAffidavit } from './affidavit';
 import { notifyLeads } from './notify';
 import { parseProfile, type ProfileInput } from './profile';
 import { MAX_UPLOAD_BYTES } from './constants';
+import { actorOf, logEvent } from './audit';
+import { addTranscript, readUpload, releaseHolds } from './transcripts';
+import { courseName } from './workflow';
+import { notifyUsers } from './notify';
 
 
 async function stepFor(stepId: number, allowed: string[]) {
@@ -34,6 +38,7 @@ export async function submitCccapply(formData: FormData) {
     db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
   }
   completeStep(me.id, 1, skip ? { id_pending: true } : { student_number: num });
+  logEvent(me.id, actorOf(me), skip ? 'CCCApply done (Shasta College ID to add later)' : 'CCCApply done', skip ? null : `Shasta College ID ${num}`);
   redirect('/student/steps/1/complete');
 }
 
@@ -43,6 +48,7 @@ export async function addStudentId(formData: FormData) {
   const num = String(formData.get('student_number') || '').trim().slice(0, 20);
   if (!/^[A-Za-z0-9-]{4,20}$/.test(num)) redirect('/student/steps/1?error=id');
   db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
+  logEvent(me.id, actorOf(me), 'Added Shasta College ID', num);
   redirect('/student?id_added=1');
 }
 
@@ -92,7 +98,7 @@ export async function addMoreClasses(formData: FormData) {
     for (const x of ce) picks.push({ id: ceCourse(x.entry), term: x.term });
     for (const x of picks) {
       if (before.has(`${x.id}:${x.term}`)) continue;
-      addRequest(me.id, x.id, x.term);
+      addRequest(me.id, x.id, x.term, actorOf(me));
       before.add(`${x.id}:${x.term}`);
       added++;
     }
@@ -125,8 +131,12 @@ export async function submitCourses(formData: FormData) {
       .filter((r) => r.term_id && open.has(r.term_id));
     const had = new Set(existing.map((r) => `${r.course_id}:${r.term_id}`));
     const del = db().prepare('DELETE FROM course_requests WHERE student_id = ? AND course_id = ? AND term_id IS ?');
-    for (const r of existing) if (!keep.has(`${r.course_id}:${r.term_id}`)) del.run(me.id, r.course_id, r.term_id);
-    for (const x of picks) addRequest(me.id, x.id, x.term);
+    for (const r of existing) {
+      if (keep.has(`${r.course_id}:${r.term_id}`)) continue;
+      logEvent(me.id, actorOf(me), `Removed ${courseName(r.course_id)}`, 'Changed on Course selection', [r.term_id]);
+      del.run(me.id, r.course_id, r.term_id);
+    }
+    for (const x of picks) addRequest(me.id, x.id, x.term, actorOf(me));
     db().prepare("DELETE FROM step_progress WHERE student_id = ? AND status = 'changes_requested'").run(me.id);
     // Any change to the classes means Shasta College clears units (and checks prerequisites) again.
     const changed = keep.size !== had.size || [...keep].some((k) => !had.has(k));
@@ -134,6 +144,7 @@ export async function submitCourses(formData: FormData) {
   });
   const total = getProgress(me.id)!.courses.reduce((n, c) => n + c.units, 0);
   completeStep(me.id, 2, { units: total });
+  logEvent(me.id, actorOf(me), 'Submitted course selection', `${total} units in all`, 'student');
   await emailApproverIfNeeded(me.id);
   redirect('/student/steps/2/complete');
 }
@@ -146,6 +157,7 @@ export async function confirmRegistered(formData: FormData) {
   const crns = String(formData.get('crns') || '').trim().slice(0, 200);
   db().prepare('INSERT OR REPLACE INTO registrations (student_id, term_id, crns, registered_at) VALUES (?,?,?,?)').run(me.id, termId, crns || null, new Date().toISOString());
   completeStep(me.id, 5, { crns, term_id: termId }); // history; the step itself follows the registrations
+  logEvent(me.id, actorOf(me), `Confirmed registered for ${p.term.name}`, crns ? `CRNs ${crns}` : null, [termId]);
   redirect(getProgress(me.id)!.steps.find((s) => s.id === 5)?.status === 'complete' ? '/student/steps/5/complete' : '/student/steps/5');
 }
 
@@ -213,6 +225,7 @@ export async function setMyStudentNumber(formData: FormData) {
   const me = await requireRole('student');
   const num = String(formData.get('student_number') || '').trim().slice(0, 20) || null;
   if (num && !/^[A-Za-z0-9-]+$/.test(num)) redirect('/student/account?error=id');
+  if (num !== me.student_number) logEvent(me.id, actorOf(me), 'Changed Shasta College ID', `${me.student_number ?? 'none'} → ${num ?? 'none'}`);
   db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, me.id);
   redirect('/student/account?saved=id');
 }
@@ -238,6 +251,7 @@ export async function reopenCourseSelection() {
   const p = getProgress(me.id);
   if (p?.steps.find((s) => s.id === 2)?.status !== 'complete') redirect('/student/steps/2');
   db().prepare('DELETE FROM step_progress WHERE student_id = ? AND step_id = 2').run(me.id);
+  logEvent(me.id, actorOf(me), 'Reopened Course selection to change classes', null, 'student');
   redirect('/student/steps/2');
 }
 
@@ -257,6 +271,7 @@ export async function submitYoungDocs(formData: FormData) {
   }
   for (const b of bufs) ids[b.field] = saveFile({ studentId: me.id, uploadedBy: me.id, kind: b.kind, filename: b.name, mime: b.mime, data: b.buf });
   completeStep(me.id, 9, { transcript_file_id: ids.transcript, letter_file_id: ids.letter });
+  logEvent(me.id, actorOf(me), 'Sent young student documents', 'Report card or transcript, and principal letter', 'student');
   await notifyLeads('young', me.id, `${me.first_name} ${me.last_name} (young student) sent a report card and principal letter; a college counselor recommendation is needed.`);
   redirect('/student/steps/9/complete');
 }
@@ -290,6 +305,7 @@ export async function submitAffidavit(formData: FormData) {
   const { me } = await stepFor(11, ['current']);
   const err = await saveAffidavit(me.id, me.id, formData.get('affidavit'));
   if (err) redirect(`/student/steps/11?error=aff_${err}`);
+  logEvent(me.id, actorOf(me), 'Uploaded the Private School Affidavit');
   await notifyLeads('homeschool', me.id, `${me.first_name} ${me.last_name} uploaded a Private School Affidavit to review.`);
   redirect('/student/steps/11');
 }
@@ -301,5 +317,51 @@ export async function studentRequestPrereq(formData: FormData) {
   const termId = Number(formData.get('termId')) || null;
   const r = db().prepare(`UPDATE course_requests SET prereq_flag = 1, prereq_flagged_by = ?, prereq_status = NULL, prereq_by = NULL, prereq_at = NULL
     WHERE student_id = ? AND course_id = ? AND term_id IS ? AND prereq_flag = 0 AND archived_at IS NULL`).run(me.id, me.id, courseId, termId);
+  if (Number(r.changes)) logEvent(me.id, actorOf(me), `Asked for prerequisite review of ${courseName(courseId)}`, null, [termId]);
   redirect(`/student/steps/2?prereq=${Number(r.changes) ? 'sent' : 'already'}#more`);
+}
+
+/** The student uploads a transcript for prerequisite review (answers "More information needed"). */
+export async function studentUploadTranscript(formData: FormData) {
+  const me = await requireRole('student');
+  const f = await readUpload(formData.get('transcript'));
+  if ('error' in f) redirect(`/student/steps/8?error=tr_${f.error}`);
+  await addTranscript(me.id, { ...actorOf(me), id: me.id }, f as { buf: Buffer; mime: string; name: string });
+  redirect('/student/steps/8?sent=transcript');
+}
+
+/**
+ * The student answers a prerequisite hold with a message (and optionally a transcript). "More information needed"
+ * goes back to the counselor queue; an appointment hold stays until the counselor decides (the message is passed on).
+ */
+export async function studentAnswerHold(formData: FormData) {
+  const me = await requireRole('student');
+  const courseId = Number(formData.get('courseId'));
+  const termId = Number(formData.get('termId')) || null;
+  const msg = String(formData.get('reply') || '').trim().slice(0, 1000);
+  const row = db().prepare(`SELECT r.prereq_hold, r.prereq_hold_by, c.code FROM course_requests r JOIN courses c ON c.id = r.course_id
+    WHERE r.student_id = ? AND r.course_id = ? AND r.term_id IS ? AND r.archived_at IS NULL AND r.prereq_hold IS NOT NULL`).get(me.id, courseId, termId) as
+    { prereq_hold: 'info' | 'appointment'; prereq_hold_by: number | null; code: string } | undefined;
+  if (!row) redirect('/student/steps/8');
+  const file = formData.get('transcript');
+  const hasFile = file instanceof File && file.size > 0;
+  if (!msg && !hasFile) redirect('/student/steps/8?error=reply');
+  let upload: { buf: Buffer; mime: string; name: string } | null = null;
+  if (hasFile) {
+    const f = await readUpload(file);
+    if ('error' in f) redirect(`/student/steps/8?error=tr_${f.error}`);
+    upload = f as { buf: Buffer; mime: string; name: string };
+  }
+  if (msg) {
+    db().prepare('UPDATE course_requests SET prereq_reply = ?, prereq_reply_at = ? WHERE student_id = ? AND course_id = ? AND term_id IS ?')
+      .run(msg, new Date().toISOString(), me.id, courseId, termId);
+    logEvent(me.id, actorOf(me), `Answered the prerequisite hold on ${row!.code}`, msg, [termId]);
+  }
+  if (upload) await addTranscript(me.id, { ...actorOf(me), id: me.id }, upload); // also answers "More information needed"
+  if (row!.prereq_hold === 'info') {
+    await releaseHolds(me.id, ['info'], actorOf(me), 'The student sent more information', { courseId, termId });
+  } else if (row!.prereq_hold_by) {
+    await notifyUsers([row!.prereq_hold_by], 'prereq', me.id, `${me.first_name} ${me.last_name} replied about the counselor appointment for ${row!.code}: “${msg || 'sent a transcript'}”`);
+  }
+  redirect(`/student/steps/8?sent=${row!.prereq_hold === 'info' ? 'info' : 'appointment'}`);
 }

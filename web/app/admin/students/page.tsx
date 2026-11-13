@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { HOLD_LABEL, stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openSchoolChange, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, adminFlagPrereq, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, adminUploadTranscript, releasePrereqHold, adminFlagPrereq, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -15,16 +15,22 @@ import { helpRequests, openHelpStudentIds } from '@/lib/help';
 import { resolveHelp } from '@/lib/help-actions';
 import { openNudges } from '@/lib/nudge';
 import { primarySchoolIds } from '@/lib/access';
+import { studentHistory } from '@/lib/audit';
+import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'help' | 'overdue' | 'units' | 'prereq' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
+type Tab = 'help' | 'overdue' | 'units' | 'prereq' | 'prereqwait' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
 type SP = { link?: string; emailed?: string; classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const DONE: Record<string, string> = {
   cleared: 'Verified and units cleared. The student moves to the next step.',
   sent_back: 'Sent back. The student will see your note on Course selection.',
   prereq: 'Prerequisite decisions saved.',
+  prereq_hold: 'Saved. Classes on hold leave the queue (Waiting on student) until the student responds or someone puts them back.',
+  hold_released: 'Back in the Prerequisites queue.',
+  hold_none: 'That class wasn’t on hold any more.',
+  transcript: 'Transcript added. A counselor sees it on Prerequisite review.',
   moved: 'Step marked complete.',
   reopened: 'Step reopened, along with every step after it.',
   course_added: 'Class added to the request.',
@@ -50,6 +56,8 @@ const DONE: Record<string, string> = {
 };
 const ERR: Record<string, string> = {
   ncws: 'Check “Student cleared in NCWS” before approving a prerequisite.',
+  info_note: 'Say what information you need in the note (the student sees it).',
+  tr_file: TRANSCRIPT_ERRORS.file, tr_size: TRANSCRIPT_ERRORS.size, tr_type: TRANSCRIPT_ERRORS.type,
   verify: 'Check Program in SACP, Start date in RGPE and Cohort in STAL before clearing.',
   no_approver: 'This student has no high school approver email on file.',
   ce: 'A concurrent class needs a course code (like PSYC C1000) and units.',
@@ -87,7 +95,9 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   const helpOpen = openHelpStudentIds();
   const groups: Record<Tab, StudentProgress[]> = {
     units: all.filter((p) => waitingOn(p, 7)),
-    prereq: all.filter((p) => waitingOn(p, 8)),
+    // Prerequisites: the counselor's queue. Classes all on hold wait on the student instead.
+    prereq: all.filter((p) => waitingOn(p, 8) && !p.steps.find((s) => s.id === 8)?.hold),
+    prereqwait: all.filter((p) => waitingOn(p, 8) && !!p.steps.find((s) => s.id === 8)?.hold),
     young: all.filter((p) => waitingOn(p, 10)),
     homeschool: all.filter((p) => waitingOn(p, 11)),
     help: all.filter((p) => helpOpen.has(p.student.id)),
@@ -97,7 +107,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
     all,
   };
-  const tab: Tab = (['help', 'overdue', 'prereq', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
+  const tab: Tab = (['help', 'overdue', 'prereq', 'prereqwait', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
@@ -127,6 +137,12 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     if (o.student) u.set('student', String(o.student));
     const s = u.toString();
     return '/admin/students' + (s ? '?' + s : '');
+  };
+  // Prerequisite tabs: show the prerequisite review's own state (it runs alongside College review, so it may not be "next").
+  const prereqCol = (p: StudentProgress) => {
+    if (tab !== 'prereq' && tab !== 'prereqwait') return null;
+    const s8 = p.steps.find((s) => s.id === 8);
+    return s8 ? `${pad(s8.num)} ${s8.hold ? HOLD_LABEL[s8.hold] : s8.short}` : null;
   };
   const keep = { tab: tab === 'units' ? '' : tab, school: mine ? 'mine' : schoolId ? String(schoolId) : '', term: termId ? String(termId) : '', q: sp.q ?? '' };
 
@@ -173,6 +189,9 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
             )}
             <Link className="seg-opt" href={href({ tab: 'units' })} aria-current={tab === 'units'}>College review · {groups.units.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'prereq' })} aria-current={tab === 'prereq'}>Prerequisites · {groups.prereq.length}</Link>
+            {(groups.prereqwait.length > 0 || tab === 'prereqwait') && (
+              <Link className="seg-opt" href={href({ tab: 'prereqwait' })} aria-current={tab === 'prereqwait'}>Prerequisites · waiting on student · {groups.prereqwait.length}</Link>
+            )}
             {(groups.young.length > 0 || tab === 'young') && (
               <Link className="seg-opt" href={href({ tab: 'young' })} aria-current={tab === 'young'}>Young students · {groups.young.length}</Link>
             )}
@@ -225,7 +244,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
                       </Link></td>
                       <td><Link className="rowa" href={link}>{p.school.name.replace(' High School', ' HS')}</Link></td>
                       <td><Link className="rowa" href={link}>{p.courses.map((c) => c.code).join(', ') || '—'}</Link></td>
-                      <td><Link className="rowa" href={link} style={p.next?.overdue ? { color: '#b3261e', fontWeight: 700 } : undefined}>{stepOnLabel(p)}</Link></td>
+                      <td><Link className="rowa" href={link} style={p.next?.overdue ? { color: '#b3261e', fontWeight: 700 } : undefined}>{prereqCol(p) ?? stepOnLabel(p)}</Link></td>
                       <td><Link className="rowa" href={link}>{daysSince(waitingSince(p)) || '—'}</Link></td>
                     </tr>,
                   ];
@@ -376,17 +395,26 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
             <div key={`${c.id}-${c.term_id}`} data-prereq={`${c.code} ${c.term_name ?? ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--color-divider)' }}>
               <div style={{ fontSize: 14 }}><strong>{c.code}</strong> · {c.title} <span className="ink60">· {c.term_name ?? 'No term'}</span></div>
               <div className="ink60" style={{ fontSize: 13 }}>Prerequisite: {c.prerequisite ?? 'flagged for review (the student hadn’t marked one)'}</div>
-              <div className="seg seg-modes" role="radiogroup" aria-label={`${c.code} ${c.term_name ?? ''} decision`} style={{ alignSelf: 'flex-start' }}>
+              {c.prereq_hold && (
+                <div style={{ fontSize: 13, background: '#fff4e0', color: '#6b3a00', padding: '6px 10px' }} data-held={c.prereq_hold}>
+                  <strong>On hold: {HOLD_LABEL[c.prereq_hold].replace('Prerequisite: ', '')}</strong> since {fmt(c.prereq_hold_at)}{c.prereq_hold_note ? <> · “{c.prereq_hold_note}”</> : ''}
+                </div>
+              )}
+              {c.prereq_reply && <div style={{ fontSize: 13, borderLeft: '3px solid var(--color-accent)', paddingLeft: 8 }} data-reply>Student replied {fmt(c.prereq_reply_at)}: “{c.prereq_reply}”</div>}
+              <div className="seg seg-modes seg-wrap" role="radiogroup" aria-label={`${c.code} ${c.term_name ?? ''} decision`} style={{ alignSelf: 'flex-start' }}>
                 <label className="seg-opt" data-v="required"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="approve" disabled={!me.is_college_counselor} />Approve</label>
                 <label className="seg-opt" data-v="off"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="decline" disabled={!me.is_college_counselor} />Decline</label>
+                <label className="seg-opt" data-v="optional"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="info" disabled={!me.is_college_counselor} />More info needed</label>
+                <label className="seg-opt" data-v="optional"><input type="radio" name={`course_${c.id}_${c.term_id ?? 0}`} value="appointment" disabled={!me.is_college_counselor} />Appointment required</label>
               </div>
+              {c.prereq_hold && <div className="ink60" style={{ fontSize: 12 }}>Leave all four unchecked to keep it on hold.</div>}
             </div>
           ))}
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, fontWeight: 700 }}>
             <input type="checkbox" name="ncws" disabled={!me.is_college_counselor} style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }} />
             Student cleared in NCWS <span className="ink60" style={{ fontWeight: 400 }}>(required to approve)</span>
           </label>
-          <div className="field"><label htmlFor="n8">Note to student (required if you decline)</label><textarea id="n8" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
+          <div className="field"><label htmlFor="n8">Note to student (required if you decline or need more information)</label><textarea id="n8" name="note" className="input" maxLength={1000} style={{ minHeight: 60, resize: 'none' }} disabled={!me.is_college_counselor} /></div>
           <button formAction={decidePrerequisites} className="btn btn-primary" disabled={!me.is_college_counselor} style={{ justifyContent: 'space-between', padding: '14px 16px', fontSize: 15 }}>Save decisions <span>→</span></button>
         </form>
       )}
@@ -406,6 +434,18 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
           <button formAction={nudgePrerequisite} className="btn btn-secondary" style={{ alignSelf: 'flex-start', color: '#b3261e', borderColor: '#b3261e' }}>{nudge ? 'Nudge again' : 'Nudge'}</button>
         </form>
       )}
+
+      {p.courses.filter((c) => c.prereq_hold && c.prereq_status !== 'approved').map((c) => (
+        <form key={`hold-${c.id}-${c.term_id}`} className="pad-sm" style={{ ...section, background: '#fff4e0', paddingTop: 12, paddingBottom: 12 }}>
+          <Hidden p={p} keep={keep} />
+          <input type="hidden" name="courseId" value={c.id} />
+          <input type="hidden" name="fromTermId" value={c.term_id ?? ''} />
+          <div style={{ fontSize: 14 }}><strong>{c.code}</strong> ({c.term_name ?? 'no term'}) is waiting on the student: {HOLD_LABEL[c.prereq_hold!].replace('Prerequisite: ', '').toLowerCase()}.</div>
+          <button formAction={releasePrereqHold} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>{c.prereq_hold === 'appointment' ? 'Appointment done: back to queue' : 'Back to queue'}</button>
+        </form>
+      ))}
+
+      <Transcripts p={p} keep={keep} />
 
       {helpList.filter((h) => h.status === 'open').map((h) => (
         <form key={h.id} className="pad-sm" style={{ ...section, background: '#fff4e0' }}>
@@ -589,12 +629,64 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </div>
       </form>
 
+      <History studentId={p.student.id} />
+
       {me.admin_level === 'super' && (
         <div className="pad-sm" style={{ padding: '16px 32px 0', fontSize: 14 }}><a href={`/admin/audit.pdf?student=${p.student.id}`}>Download audit PDF (consent + course requests)</a></div>
       )}
       {consent?.status === 'complete' && (
         <div className="pad-sm" style={{ padding: '16px 32px', fontSize: 14 }}><a href={`/consent/${p.student.id}`} target="_blank" rel="noreferrer">View parent consent</a></div>
       )}
+    </div>
+  );
+}
+
+/** Transcripts on file (for prerequisite review), newest first, and uploading one for the student. */
+function Transcripts({ p, keep }: { p: StudentProgress; keep: Record<string, string> }) {
+  const files = transcriptsFor(p.student.id);
+  // "New" = added since the last prerequisite decision.
+  const lastDecision = p.courses.map((c) => c.prereq_at ?? '').sort().at(-1) ?? '';
+  return (
+    <form className="pad-sm" style={section} data-transcripts>
+      <Hidden p={p} keep={keep} />
+      <div className="kicker">Transcripts · {files.length}</div>
+      {files.length === 0 && <div className="ink60" style={{ fontSize: 13 }}>None on file.</div>}
+      {files.map((f) => (
+        <div key={f.id} style={{ fontSize: 14 }}>
+          <a href={`/files/${f.id}`} target="_blank" rel="noreferrer">{f.filename}</a>
+          {f.created_at > lastDecision && <span className="tag" style={{ marginLeft: 6, background: 'var(--color-accent)', color: '#fff' }}>New</span>}
+          <span className="ink60" style={{ fontSize: 12 }}> · {fmt(f.created_at)} · {f.by_name ?? 'unknown'} ({f.by_role === 'student' ? 'student' : f.by_role === 'counselor' ? 'high school' : 'Shasta College'})</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input name="transcript" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required className="input" aria-label="Transcript file" style={{ flex: '1 1 200px', minWidth: 0 }} />
+        <button formAction={adminUploadTranscript} className="btn btn-secondary">Upload for student</button>
+      </div>
+    </form>
+  );
+}
+
+/** Who did what, when: per term (newest first), then account-wide events. */
+function History({ studentId }: { studentId: number }) {
+  const groups = studentHistory(studentId);
+  return (
+    <div className="pad-sm" style={section} data-history>
+      <div className="kicker">History</div>
+      {groups.length === 0 && <div className="ink60" style={{ fontSize: 13 }}>Nothing recorded yet.</div>}
+      {groups.map((g, i) => (
+        <details key={g.termId ?? 'none'} open={i === 0} data-history-term={g.termName}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>{g.termName} · {g.events.length}</summary>
+          <ol style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {g.events.map((e) => (
+              <li key={e.id} style={{ fontSize: 13, borderLeft: '3px solid var(--color-divider)', paddingLeft: 10 }}>
+                <div><strong>{e.action}</strong></div>
+                <div className="ink60">{fmt(e.at, 'mdy')} {fmt(e.at, 'time')} · {e.actor_name} ({e.actor_role})</div>
+                {e.detail && <div style={{ whiteSpace: 'pre-wrap' }}>{e.detail}</div>}
+              </li>
+            ))}
+          </ol>
+        </details>
+      ))}
     </div>
   );
 }

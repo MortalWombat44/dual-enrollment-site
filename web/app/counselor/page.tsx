@@ -3,7 +3,9 @@ import Link from 'next/link';
 import { requireRole } from '@/lib/auth';
 import { db, stepIndex } from '@/lib/db';
 import { classLabel, currentGrade, GRADES, isYoung, openIdChange, ordinal, nextRegistration, daysSince, fmt, getProgress, getSchool, schoolModes, type StudentProgress } from '@/lib/workflow';
-import { approve, requestIdChange, staffSetGrade } from '@/lib/counselor-actions';
+import { approve, requestIdChange, staffSetGrade, staffUploadTranscript } from '@/lib/counselor-actions';
+import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
+import { HOLD_LABEL } from '@/lib/workflow';
 import { TopBar, Flash } from '@/components/chrome';
 import { TermCourses } from '@/components/TermCourses';
 import { ApproveSignForm } from '@/components/ApproveSignForm';
@@ -47,13 +49,14 @@ export default async function CounselorQueue({ searchParams }: { searchParams: P
     return '/counselor' + (s ? '?' + s : '');
   };
   const flash = sp.done === 'approved' ? `Approved ${sp.name}'s courses. Shasta College clears their units next.` : sp.done === 'changes' ? `Sent ${sp.name}'s plan back with your note.`
+    : sp.done === 'transcript' ? 'Transcript sent to Shasta College for prerequisite review.'
     : sp.done === 'grade' ? 'Grade and graduation year saved.' : sp.done === 'id_request' ? 'ID change request sent to Shasta College.' : sp.done === 'help' ? 'Flagged for help. Shasta College staff will follow up.' : null;
 
   return (
     <div className="frame">
       <TopBar user={me} nav={[{ href: '/counselor', label: 'Review queue' }]} current="/counselor" right={<span className="tag tag-neutral">Counselor · {school?.name.replace('High School', 'HS') ?? '—'}</span>} />
       <Flash msg={flash} />
-      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows why a class was declined.' : sp.error === 'decide' ? 'Approve or decline every class.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : sp.error === 'help' ? 'Say where the student is stuck.' : null} error />
+      <Flash msg={sp.error === 'note' ? 'Add a note so the student knows why a class was declined.' : sp.error === 'decide' ? 'Approve or decline every class.' : sp.error === 'signature' ? 'Sign (saved, drawn or typed) before approving.' : sp.error === 'grade' ? 'Pick a grade and a graduation year.' : sp.error === 'id' ? 'A Shasta College ID uses only letters, numbers and dashes.' : sp.error === 'help' ? 'Say where the student is stuck.' : sp.error?.startsWith('tr_') ? TRANSCRIPT_ERRORS[sp.error.slice(3)] ?? null : null} error />
       {counselorOff && <Flash msg={`High school approval is turned off for ${school?.name}. New students skip this step.`} />}
       <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderBottom: '2px solid var(--color-text)' }}>
         <Stat label="Waiting on you" value={String(groups.ready.length)} hero />
@@ -159,6 +162,7 @@ function ReviewPanel({ p, me }: { p: StudentProgress | null; me: User }) {
         <textarea name="message" className="input" required minLength={3} maxLength={1000} placeholder="Where is the student stuck?" style={{ minHeight: 60, resize: 'none' }} aria-label="Where is the student stuck?" />
         <div><button className="btn btn-secondary">Flag for help</button></div>
       </form>
+      <StudentTranscripts p={p} />
       <StudentRecord p={p} />
     </div>
   );
@@ -202,5 +206,31 @@ function StudentRecord({ p }: { p: StudentProgress }) {
         )}
       </form>
     </>
+  );
+}
+
+/** High school staff can send Shasta College a transcript for the student's prerequisite review. */
+function StudentTranscripts({ p }: { p: StudentProgress }) {
+  const files = transcriptsFor(p.student.id);
+  const held = p.courses.filter((c) => c.prereq_hold === 'info' && c.prereq_status !== 'approved');
+  return (
+    <form action={staffUploadTranscript} className="pad-sm" style={{ padding: '20px 32px', borderTop: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10 }} data-transcripts>
+      <input type="hidden" name="studentId" value={p.student.id} />
+      <div className="kicker">Transcripts for Shasta College</div>
+      {held.map((c) => (
+        <div key={`${c.id}-${c.term_id}`} style={{ fontSize: 13, background: '#fff4e0', color: '#6b3a00', padding: '6px 10px' }}>
+          {HOLD_LABEL.info} for {c.code}{c.prereq_hold_note ? `: “${c.prereq_hold_note}”` : ''}. A transcript sends it back to the college counselor.
+        </div>
+      ))}
+      {files.length > 0 ? (
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
+          {files.map((f) => <li key={f.id}><a href={`/files/${f.id}`} target="_blank" rel="noreferrer">{f.filename}</a> <span className="ink60">· {fmt(f.created_at)}</span></li>)}
+        </ul>
+      ) : <div className="ink60" style={{ fontSize: 13 }}>None sent yet.</div>}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input name="transcript" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required className="input" aria-label="Transcript file" style={{ flex: '1 1 200px', minWidth: 0 }} />
+        <button className="btn btn-secondary">Upload transcript</button>
+      </div>
+    </form>
   );
 }

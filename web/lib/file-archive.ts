@@ -62,7 +62,7 @@ const safe = (s: string) => s.replace(/[^\w.\- ]+/g, '_').trim() || 'file';
 const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 const KIND: Record<string, string> = {
   signature: 'Parent signature', consent_upload: 'Uploaded consent form', hs_signature: 'High school approval signature',
-  young_transcript: 'Transcript / report card', young_letter: "Principal's letter", affidavit: 'Private School Affidavit',
+  young_transcript: 'Transcript / report card', transcript: 'Transcript (prerequisite review)', young_letter: "Principal's letter", affidavit: 'Private School Affidavit',
 };
 
 /**
