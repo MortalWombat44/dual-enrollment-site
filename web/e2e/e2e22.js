@@ -22,6 +22,7 @@ async function signup(b, o) {
   await s.fill('#first', o.first); await s.fill('#last', o.last || 'Test'); await s.fill('#email', o.email);
   if (o.school === 'other' || o.school === 'homeschool') await s.selectOption('#school', o.school); else await s.selectOption('#school', { label: o.school });
   if (o.school === 'other') { await s.fill('#other_school', o.otherName); await s.fill('#approver_name', 'Pat Lee'); await s.fill('#approver_email', 'pat.lee@trinity.example.org'); }
+  if (o.school === 'homeschool') { await s.fill('#approver_name', 'Hiro Hale'); await s.fill('#approver_email', 'hiro.hale@example.org'); }
   await s.selectOption('#grade', String(o.grade ?? 11));
   const grads = await s.locator('#grad option').evaluateAll((x) => x.map((y) => y.value).filter(Boolean)); await s.selectOption('#grad', o.grade === 12 ? grads[0] : grads[1]);
   await s.fill('#dob', o.dob); await s.fill('#phone', '530 555 0142'); await s.fill('#address', '12 Oak St'); await s.fill('#city', 'Weaverville'); await s.fill('#zip', '96093');
@@ -98,7 +99,7 @@ const notices = (email) => sql('SELECT n.kind, n.message FROM notifications n JO
   check(/Homeschool lead/.test(await d.locator('tr:has-text("Jordan Kim")').innerText()), 'Users page: Jordan marked Homeschool lead and Young student lead');
   grantConsent('hana.h@student.example.org');
   const hs = await stepsText(h);
-  check(hs.includes('Private School Affidavit') && !hs.includes('High school approval'), 'homeschool: affidavit step, no high school approval');
+  check(hs.includes('Private School Affidavit') && hs.includes('High school approval'), 'homeschool: affidavit step, plus approval by the approver they named');
   const pdf = fs.readFileSync(__dirname + '/signed-form.pdf');
   const upload = async () => {
     await h.goto(B + '/student/steps/11');

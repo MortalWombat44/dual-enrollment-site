@@ -28,7 +28,7 @@ run() { # each test gets a fresh database; files a test writes (like signed-form
 if [ $# -gt 0 ]; then run "$@"
 else
   # Order matters: e2e13 writes signed-form.pdf, which 15, 17, 21 and 22 use.
-  run 2 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28
+  run 2 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30
 fi
 pkill -f next-server 2>/dev/null || true
 echo "ALL E2E TESTS PASSED"

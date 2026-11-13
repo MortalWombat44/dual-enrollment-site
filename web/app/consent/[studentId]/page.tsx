@@ -22,7 +22,7 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
     if (!canSeeStudent(me, Number(studentId)) && !(isParentOf(me, Number(studentId)) && signedBy === me.id)) notFound();
   }
   const step = p?.steps.find((s) => s.id === 3);
-  const d = (step?.data ?? {}) as { method?: string; signer?: string; file_id?: number };
+  const d = (step?.data ?? {}) as { method?: string; signer?: string; file_id?: number; sign_method?: string };
   const file = d.file_id ? getFile(d.file_id) : null;
   const line = (label: string, value?: string) => (
     <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--color-divider)', fontSize: 14 }}>
@@ -50,7 +50,7 @@ export default async function ConsentRecord({ params }: { params: Promise<{ stud
       </p>
       <div>
         {line('Parent / guardian name', d.signer)}
-        {line('Signed', step?.completedAt ? `${fmt(step.completedAt, 'mdy')}, ${fmt(step.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded signed form' : d.method === 'office' ? 'on file with Shasta College' : 'e-signature'}` : undefined)}
+        {line('Signed', step?.completedAt ? `${fmt(step.completedAt, 'mdy')}, ${fmt(step.completedAt, 'time')} · ${d.method === 'upload' ? 'uploaded signed form' : d.method === 'office' ? 'on file with Shasta College' : d.sign_method === 'typed' ? 'e-signature (name typed)' : 'e-signature'}` : undefined)}
       </div>
       {file && file.kind === 'signature' && (
         <div style={{ border: '2px solid var(--color-text)', background: '#fff', padding: 12 }}>

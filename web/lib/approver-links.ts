@@ -2,7 +2,7 @@ import 'server-only';
 import crypto from 'node:crypto';
 import { db } from './db';
 import { sendMail } from './mail';
-import { getProgress } from './workflow';
+import { getProgress, namesApprover } from './workflow';
 import { siteOrigin } from './site';
 
 /** Links for outside high school approvers (students at an unlisted school). Only a hash of the token is stored. */
@@ -25,14 +25,14 @@ export function studentForApproverLink(token: string): { studentId: number; emai
   const r = db().prepare(`SELECT l.student_id, l.email, u.hs_approver_email, s.kind FROM approver_links l JOIN users u ON u.id = l.student_id
     LEFT JOIN schools s ON s.id = u.school_id WHERE l.token_hash = ? AND l.expires_at > ?`).get(hash(token), new Date().toISOString()) as
     { student_id: number; email: string; hs_approver_email: string | null; kind: string | null } | undefined;
-  if (!r || r.kind !== 'other' || r.hs_approver_email !== r.email) return null;
+  if (!r || !namesApprover({ kind: r.kind ?? '' }) || r.hs_approver_email !== r.email) return null;
   return { studentId: r.student_id, email: r.email };
 }
 
 /** Email the approver a fresh link when classes are waiting on them. Returns the link (to show), and whether it was emailed. */
 export async function sendApproverLink(studentId: number): Promise<{ link: string; emailed: boolean } | null> {
   const p = getProgress(studentId);
-  if (!p || p.school.kind !== 'other' || !p.student.hs_approver_email) return null;
+  if (!p || !namesApprover(p.school) || !p.student.hs_approver_email) return null;
   const path = createApproverLink(studentId);
   if (!path) return null;
   const link = `${await siteOrigin()}${path}`;
@@ -40,7 +40,7 @@ export async function sendApproverLink(studentId: number): Promise<{ link: strin
   const emailed = pending.length > 0 && await sendMail({
     to: p.student.hs_approver_email,
     subject: `${p.student.first_name} ${p.student.last_name} needs high school approval for Shasta College classes`,
-    text: `Hello ${p.student.hs_approver_name ?? ''},\n\n${p.student.first_name} ${p.student.last_name} (${p.school.name}) named you as the person who approves dual enrollment classes at their high school. They've asked to take: ${pending.join(', ')}.\n\nReview and approve or decline each class here (no account needed). The link works for ${DAYS} days:\n${link}\n\nShasta College Dual Enrollment`,
+    text: `Hello ${p.student.hs_approver_name ?? ''},\n\n${p.student.first_name} ${p.student.last_name} (${p.school.name}) named you as the person who approves their dual enrollment classes${p.school.kind === 'homeschool' ? ' (as the administrator of their home school)' : ' at their high school'}. They've asked to take: ${pending.join(', ')}.\n\nReview and approve or decline each class here (no account needed). The link works for ${DAYS} days:\n${link}\n\nShasta College Dual Enrollment`,
   });
   return { link, emailed };
 }

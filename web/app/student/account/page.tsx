@@ -1,6 +1,6 @@
 import { requireRole } from '@/lib/auth';
 import { sharesWithParents } from '@/lib/access';
-import { classLabel, currentGrade, fmt, getProgress, openSchoolChange } from '@/lib/workflow';
+import { classLabel, currentGrade, fmt, getProgress, openSchoolChange, namesApprover } from '@/lib/workflow';
 import { listedSchools, SCHOOL_ERRORS } from '@/lib/schools';
 import { PROFILE_ERRORS } from '@/lib/profile';
 import { SchoolPicker } from '@/components/SchoolPicker';
@@ -81,9 +81,13 @@ export default async function Account({ searchParams }: { searchParams: Promise<
           </details>
         )}
       </div>
-      {p?.school.kind === 'other' && (
-        <form action={saveHsApprover} className="pad-sm" style={{ padding: '24px 40px', borderBottom: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>
-          <div className="kicker">Who approves your classes at {p.school.name}</div>
+      {p && namesApprover(p.school) && (
+        <form id="approver" action={saveHsApprover} className="pad-sm" style={{ padding: '24px 40px', borderBottom: '2px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>
+          <div className="kicker">Who approves your classes{p.school.kind === 'homeschool' ? '' : ` at ${p.school.name}`}</div>
+          <div className="ink60" style={{ fontSize: 13 }}>
+            {p.school.kind === 'homeschool' ? 'The administrator of your home school (usually the parent or guardian on your Private School Affidavit).' : 'The administrator at your high school who approves dual enrollment classes (for example the principal, not office staff).'}
+            {' '}Shasta College checks that it&apos;s the right person{me.hs_approver_status === 'approved' ? ' (confirmed)' : ''}. If you change it, they check again.
+          </div>
           <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="field"><label htmlFor="approver_name">Name</label><input id="approver_name" name="approver_name" className="input" required defaultValue={me.hs_approver_name ?? ''} /></div>
             <div className="field"><label htmlFor="approver_email">Email</label><input id="approver_email" name="approver_email" type="email" className="input" required defaultValue={me.hs_approver_email ?? ''} /></div>

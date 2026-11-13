@@ -4,7 +4,7 @@ import { db } from './db';
 import { getFile, readFile } from './files';
 import { archivedRequests, classLabel, isAdult, fmt, getProgress, getTerm, type StudentProgress, type Term } from './workflow';
 import { unitLimit } from './constants';
-import { HOLD_LABEL } from './workflow';
+import { HOLD_LABEL, namesApprover } from './workflow';
 import { studentHistory } from './audit';
 import { transcriptsFor } from './transcripts';
 
@@ -101,14 +101,14 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
   // 1 · Parent / guardian consent
   w.heading('Parent / guardian consent');
   const consent = p.steps.find((s) => s.id === 3);
-  const cd = (consent?.data ?? {}) as { method?: string; signer?: string; file_id?: number; parent_id?: number; admin_id?: number };
+  const cd = (consent?.data ?? {}) as { method?: string; signer?: string; file_id?: number; parent_id?: number; admin_id?: number; sign_method?: string };
   let uploaded: ReturnType<typeof getFile> = null;
   if (!consent) w.text(isAdult(p.student) ? `Not required: the student is 18 or older (born ${p.student.date_of_birth}).` : 'Parent consent is turned off for this school.');
   else if (consent.status !== 'complete') w.text('No parent consent on file.', { bold: true });
   else {
     w.text(`Signed by: ${cd.signer ?? '—'}${cd.parent_id ? ` (parent / guardian account: ${fullName(person(cd.parent_id))})` : ''}`);
     w.text(`Signed on: ${when(consent.completedAt)}`);
-    w.text(`Method: ${cd.method === 'upload' ? 'Uploaded signed form' : cd.method === 'office' ? `On file with Shasta College (marked complete by ${fullName(person(cd.admin_id))})` : 'Electronic signature'}`);
+    w.text(`Method: ${cd.method === 'upload' ? 'Uploaded signed form' : cd.method === 'office' ? `On file with Shasta College (marked complete by ${fullName(person(cd.admin_id))})` : `Electronic signature${cd.sign_method === 'typed' ? ' (name typed, shown in script)' : cd.sign_method === 'drawn' ? ' (drawn)' : ''}`}`);
     w.text('One-time consent covering this and future terms until revoked.', { size: 9, color: MUTED, gap: 6 });
     if (cd.method === 'esign') {
       const img = await embedStoredPng(doc, cd.file_id);
@@ -149,6 +149,12 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
   else {
     // One approval per class per term. Classes approved together share one signature.
     w.text('High school approval (each class, each term):', { bold: true, gap: 4 });
+    if (namesApprover(p.school)) {
+      const st = p.student;
+      w.text(!st.hs_approver_email ? 'Approver named by the student: none yet.'
+        : `Approver named by the student: ${st.hs_approver_name ?? ''} (${st.hs_approver_email}). ${st.hs_approver_status === 'approved'
+          ? `Confirmed by ${fullName(person(st.hs_approver_reviewed_by))}, Shasta College, on ${when(st.hs_approver_reviewed_at)}.` : 'Not yet reviewed by Shasta College.'}`, { size: 9, x: M + 14, gap: 4 });
+    }
     const list = p.courses.filter((c) => terms.some((t) => t.id === c.term_id));
     if (!list.length) w.text('No classes in the selected term(s).', { size: 9, x: M + 14 });
     const batches = new Map<string, typeof list>();
@@ -160,6 +166,10 @@ async function addStudent(doc: PDFDocument, font: PDFFont, bold: PDFFont, p: Stu
       const names = cs.map((c) => `${c.code} (${c.term_name ?? 'no term'})`).join(', ');
       if (k === 'pending') { w.text(`${names}: not yet approved.`, { size: 10, x: M + 14, bold: true }); continue; }
       const c = cs[0];
+      if (c.hs_sign_method === 'grandfathered') {
+        w.text(`${names}: requested before homeschooled students named an approver; counted as approved on ${when(c.hs_at)}.`, { x: M + 14 });
+        continue;
+      }
       if (c.hs_sign_method === 'admin') {
         w.text(`${names}: marked approved by Shasta College admin ${fullName(person(c.hs_by))} on ${when(c.hs_at)} (no high school signature).`, { x: M + 14 });
         continue;

@@ -73,7 +73,7 @@ Before committing a behavior change:
 - **Workflow engine** (`lib/workflow.ts`):
   - `getProgress(studentId)` is the one place a student's step statuses are computed. **For lists, use `getProgressMany(ids)`** (a handful of queries in total); calling `getProgress` in a loop made the Students page take 4 seconds at 2,000 students.
   - Most steps are stored in `step_progress`. Several are **derived**:
-    - High school approval (4): every `course_requests.hs_status = 'approved'`. CCAP schools and homeschool never need it.
+    - High school approval (4): every `course_requests.hs_status = 'approved'`. CCAP schools never need it. Unlisted ("Other") schools and homeschool (`namesApprover(school)`) use an approver the student names, who approves by link; a college admin reviews that person (`users.hs_approver_status`, `lib/approver-review.ts`), and `clearUnits` refuses until it's `'approved'`.
     - Prerequisite review (8): every request with `needs_prereq` has `prereq_status = 'approved'`. It runs alongside step 7, not after it, so a student's `next` step is often 7 even when 8 needs them.
       A class can be on hold (`course_requests.prereq_hold` = `'info'` | `'appointment'`). When every remaining class is held, step 8 gets `hold` and the student shows in the "waiting on student" tab instead of the counselor queue.
     - College review & clear units (7): auto-complete through `unit_clearances` (the CCAP "cleared for max units" option).

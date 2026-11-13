@@ -40,6 +40,10 @@ export type User = {
   plans_year: number | null;
   hs_approver_name: string | null;
   hs_approver_email: string | null;
+  /** A college admin reviews the named approver: 'pending' until confirmed (or corrected). */
+  hs_approver_status: 'pending' | 'approved' | null;
+  hs_approver_reviewed_by?: number | null;
+  hs_approver_reviewed_at?: string | null;
 };
 
 const COOKIE = 'de_session';
@@ -78,7 +82,7 @@ export async function currentUser(): Promise<User | null> {
   const row = db()
     .prepare(
       `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.school_id, u.status, u.title, u.grade, u.grad_year, u.grade_confirmed_year, u.signature_file_id, u.retired_at, u.student_number, u.counselor_id, u.admin_level, u.is_college_counselor, u.is_young_approver, u.is_young_lead, u.is_homeschool_lead,
-         u.date_of_birth, u.phone, u.address_line, u.city, u.state, u.zip, u.plans_shasta, u.plans_year, u.hs_approver_name, u.hs_approver_email
+         u.date_of_birth, u.phone, u.address_line, u.city, u.state, u.zip, u.plans_shasta, u.plans_year, u.hs_approver_name, u.hs_approver_email, u.hs_approver_status
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ? AND s.expires_at > ? AND u.disabled = 0`,
     )

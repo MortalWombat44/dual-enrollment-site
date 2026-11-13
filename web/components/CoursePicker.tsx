@@ -42,12 +42,17 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
     courses.filter((c) => sel.get(c.id) === termId).reduce((n, c) => n + c.units, 0)
     + ce.filter((r) => r.term === termId).reduce((n, r) => n + (Number(r.units) > 0 ? Number(r.units) : 0), 0);
   const termsFor = (c: Course) => (c.offered_term_id ? terms.filter((t) => t.id === c.offered_term_id) : terms);
-  const toggle = (id: number) => setSel((s) => {
-    const n = new Map(s);
+  // Picking a Concurrent class with a prerequisite: a pop-up says a transcript is needed.
+  const [notice, setNotice] = useState<{ code: string; prerequisite?: string | null } | null>(null);
+  const toggle = (id: number) => {
     const c = courses.find((x) => x.id === id);
-    if (n.has(id)) n.delete(id); else n.set(id, (c && termsFor(c)[0]?.id) ?? terms[0]?.id ?? 0);
-    return n;
-  });
+    if (c && c.kind === 'ce' && c.prerequisite && !sel.has(id)) setNotice({ code: c.code, prerequisite: c.prerequisite });
+    setSel((s) => {
+      const n = new Map(s);
+      if (n.has(id)) n.delete(id); else n.set(id, (c && termsFor(c)[0]?.id) ?? terms[0]?.id ?? 0);
+      return n;
+    });
+  };
   const setTerm = (id: number, termId: number) => setSel((s) => new Map(s).set(id, termId));
 
   // Sections offered in one term only show while that term is open.
@@ -118,7 +123,7 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
             <button type="button" className="btn btn-ghost" style={{ color: 'var(--color-accent-700)', fontSize: 13 }} onClick={() => setCe((rows) => rows.filter((_, j) => j !== i))}>Remove</button>
             <input type="hidden" name="ce_prereq" value={r.prereq ? '1' : '0'} />
             <label style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-              <input type="checkbox" checked={r.prereq} onChange={(e) => setRow(i, { prereq: e.target.checked })} style={{ accentColor: 'var(--color-accent)' }} />
+              <input type="checkbox" checked={r.prereq} onChange={(e) => { setRow(i, { prereq: e.target.checked }); if (e.target.checked) setNotice({ code: r.code.trim().toUpperCase() || 'This class' }); }} style={{ accentColor: 'var(--color-accent)' }} />
               This class has a prerequisite (a college counselor will review it)
             </label>
           </div>
@@ -132,6 +137,23 @@ export function CoursePicker({ courses, initial, initialCe, terms, ccap, schoolN
           Note: {unitsIn(t.id)} units in {t.name} is over the usual {t.limit}-unit limit for {ccap ? 'CCAP' : 'non-CCAP'} students. You can still submit; Shasta College will review it when clearing your units.
         </div>
       ))}
+      {notice && (
+        <div role="dialog" aria-modal="true" aria-labelledby="prereq-notice-title" data-prereq-notice
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(32,30,29,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', border: '2px solid var(--color-text)', maxWidth: 520, width: '100%', padding: '28px 28px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="kicker" style={{ color: '#8a4b00' }}>Transcript needed</div>
+            <div id="prereq-notice-title" style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.15 }}>{notice.code} has a prerequisite.</div>
+            {notice.prerequisite && <div style={{ fontSize: 15 }}>Prerequisite: <strong>{notice.prerequisite}</strong></div>}
+            <div style={{ fontSize: 15 }}>A Shasta College counselor has to check it before you can register, and they need <strong>your transcript</strong> to do that.</div>
+            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 15, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <li>After you submit your classes, open the <strong>Prerequisite review</strong> step and upload your transcript (a PDF or a clear photo).</li>
+              <li>Your high school counselor can also send it to Shasta College for you.</li>
+            </ul>
+            <div className="ink60" style={{ fontSize: 13 }}>Without a transcript, this class can&apos;t be approved and your registration may be delayed.</div>
+            <div><button type="button" autoFocus className="btn btn-primary" style={{ minWidth: 220, justifyContent: 'space-between' }} onClick={() => setNotice(null)}>OK, I&apos;ll send my transcript <span>→</span></button></div>
+          </div>
+        </div>
+      )}
       <div className="ink60" style={{ fontSize: 13, marginTop: 10 }}>
         Registration: {terms.map((t) => `${t.name} opens ${t.opens}`).join(' · ')}
       </div>

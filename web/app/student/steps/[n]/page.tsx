@@ -15,7 +15,7 @@ import { studentSendApproverLink } from '@/lib/approver-actions';
 import { PacketTable } from '@/components/PacketTable';
 import { ParentInvite } from '@/components/ParentInvite';
 import { logout } from '@/lib/session-actions';
-import { HOLD_LABEL } from '@/lib/workflow';
+import { HOLD_LABEL, namesApprover } from '@/lib/workflow';
 import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
 import { COUNSELING_APPOINTMENT_URL } from '@/lib/constants';
 
@@ -251,6 +251,7 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed, se
       s.id === 8 ? 'A Shasta College counselor is reviewing the classes you picked that have a prerequisite.' :
       s.id === 10 ? 'A Shasta College counselor is reviewing your documents, then Shasta College makes the final decision.' :
       s.id === 11 ? 'Shasta College is reviewing your Private School Affidavit.' :
+      namesApprover(p.school) ? 'Your approver is reviewing your classes. Check with them if you have questions.' :
       'Your high school is reviewing your classes. Check with your high school counselor if you have questions.') :
     s.status === 'waiting_parent' ? (
       p.parents.some((x) => x.status === 'active') ? `${displayName(p.parents.find((x) => x.status === 'active')!)} can sign online from their own account.` :
@@ -300,11 +301,20 @@ function OpenView({ p, s, error, invited, inviteError, approverLink, emailed, se
             <div><button className="btn btn-primary bigbtn full-sm" style={{ minWidth: 300 }}>{s.status === 'changes' ? 'Resubmit courses' : 'Submit courses'} <span>→</span></button></div>
           </form>
         )}
-        {s.id === 4 && s.status === 'in_review' && p.school.kind === 'other' && (
+        {s.id === 4 && s.status === 'in_review' && namesApprover(p.school) && !p.student.hs_approver_email && (
+          <div style={{ fontSize: 15, borderLeft: '4px solid #d08a00', background: '#fff4e0', padding: '14px 18px' }} data-need-approver>
+            <strong>Name your approver.</strong> Tell us who approves your classes: {p.school.kind === 'homeschool' ? 'the administrator of your home school (usually the parent or guardian on your Private School Affidavit)' : 'the administrator at your high school (for example the principal, not office staff)'}.
+            {' '}<a href="/student/account#approver">Add them on your Account page</a>.
+          </div>
+        )}
+        {s.id === 4 && s.status === 'in_review' && namesApprover(p.school) && p.student.hs_approver_email && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, borderLeft: '4px solid var(--color-accent)', paddingLeft: 16 }}>
             <div style={{ fontSize: 15 }}>
-              Your approver at {p.school.name}: <strong>{p.student.hs_approver_name}</strong> ({p.student.hs_approver_email}). They approve your classes from a link, no account needed.
-              {' '}<a href="/student/account">Change approver</a>
+              Your approver{p.school.kind === 'homeschool' ? '' : ` at ${p.school.name}`}: <strong>{p.student.hs_approver_name}</strong> ({p.student.hs_approver_email}). They approve your classes from a link, no account needed.
+              {' '}<a href="/student/account#approver">Change approver</a>
+            </div>
+            <div className="ink60" style={{ fontSize: 13 }} data-approver-status>
+              {p.student.hs_approver_status === 'approved' ? 'Shasta College confirmed this is the right person.' : 'Shasta College also checks that this is the right person (the school administrator) and may change it.'}
             </div>
             {approverLink && (
               <div style={{ fontSize: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>

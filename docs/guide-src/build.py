@@ -74,6 +74,7 @@ body.append('''
 <tr><td><strong>Prerequisites · waiting on student</strong> <span class="pill">when waiting</span></td><td>Prerequisite reviews a counselor put on hold (more information or an appointment needed). They come back to <em>Prerequisites</em> when the student responds.</td></tr>
 <tr><td><strong>Young students</strong> <span class="pill">when waiting</span></td><td>Students in 8th grade and below waiting for a recommendation or decision.</td></tr>
 <tr><td><strong>Homeschool</strong> <span class="pill">when waiting</span></td><td>Private School Affidavits waiting for review.</td></tr>
+<tr><td><strong>Approver review</strong> <span class="pill">when waiting</span></td><td>Students at an unlisted school or who are homeschooled named someone to approve their classes; you confirm or correct who it is.</td></tr>
 <tr><td><strong>School changes · ID changes · Shared IDs</strong></td><td>Requests to change a student&rsquo;s high school or Shasta College ID, and IDs that appear on more than one account.</td></tr>
 <tr><td><strong>All students</strong></td><td>Everyone, for lookups and corrections, 200 per page. Retired and disabled students appear only here (labelled), not in the work queues.</td></tr>
 </tbody></table>
@@ -89,9 +90,9 @@ body.append('''
 <thead><tr><th style="width:30%">Step</th><th>Applies to</th><th style="width:26%">Done by</th></tr></thead>
 <tbody>
 <tr><td>Apply on CCCApply</td><td>Everyone, once ever. A student may skip entering their ID, but is brought back to this step at each sign-in until it&rsquo;s added.</td><td>Student</td></tr>
-<tr><td>Parent consent</td><td>Students under 18 <em>today</em>. One-time, general consent that covers future terms. Course selection stays locked until it&rsquo;s signed.</td><td>Parent (digital signature only)</td></tr>
+<tr><td>Parent consent</td><td>Students under 18 <em>today</em>. One-time, general consent that covers future terms. Course selection stays locked until it&rsquo;s signed.</td><td>Parent (digital signature only: drawn, or name typed in script)</td></tr>
 <tr><td>Course selection</td><td>Everyone. Dual Enrollment from the school&rsquo;s list; Concurrent from the college&rsquo;s list or typed in. Students can request more classes at any time afterwards.</td><td>Student</td></tr>
-<tr><td>High school approval</td><td>Non-CCAP schools and unlisted (&ldquo;Other&rdquo;) schools. Never CCAP or homeschool.</td><td>High school staff, or the named outside approver</td></tr>
+<tr><td>High school approval</td><td>Non-CCAP schools, unlisted (&ldquo;Other&rdquo;) schools and homeschool. Never CCAP.</td><td>High school staff, or the named outside approver</td></tr>
 <tr><td>Private School Affidavit</td><td>Homeschooled students.</td><td>Student or parent uploads; College Admin reviews</td></tr>
 <tr><td>Young student review</td><td>8th grade and below.</td><td>College counselor, then a Young Student Approver</td></tr>
 <tr><td>College review</td><td>Everyone. Runs at the same time as prerequisite review.</td><td>College Admin</td></tr>
@@ -187,8 +188,17 @@ body.append('''
 <ul class="ticks">
 <li><strong>Listed Non-CCAP schools:</strong> the school&rsquo;s High School Staff approve or decline each class from their review queue and sign once for the batch, using a saved, drawn or typed signature.</li>
 <li><strong>Unlisted (&ldquo;Other&rdquo;) schools:</strong> the student names the approver and their email. The approver gets a secure link (valid 90 days) and approves without an account. If email isn&rsquo;t set up, the student or you can send the link: open the student and click <strong>Send a new approval link</strong>. A new link replaces the old one.</li>
+<li><strong>Homeschool:</strong> the student names the administrator of their home school (usually the parent or guardian on the Private School Affidavit), who approves by link in the same way. The affidavit is still reviewed separately.</li>
 <li><strong>Moving back:</strong> approvals live on each class, so High school approval can&rsquo;t be moved back. If you try, the portal lists the classes that were already approved. To change a class, remove it or move it to another term; the new request goes back to the high school.</li>
 </ul>''')
+body.append('''<h3>Reviewing the approver a student named</h3>
+<p>Students sometimes name office staff when the approver has to be the school <strong>administrator</strong>. The approval link goes to the named person right away, and you review who it is alongside.</p>''')
+body.append(steps(
+    'Open the <strong>Approver review</strong> tab (it appears while any are waiting) and click the student.',
+    'Under <em>High school approver</em>, check the name and email. If it&rsquo;s the right person, click <strong>Confirm approver</strong>.',
+    'If it isn&rsquo;t, correct the name and email first, then click <strong>Confirm approver</strong>. The new person gets the link, the old link stops working, and anything the old person approved goes back to waiting.',
+))
+body.append(callout('info', 'College review waits for this', 'You can&rsquo;t clear College review for these students until their approver is confirmed. If the student changes their approver later, it comes back to this tab; approvals already given stay.'))
 body.append('</section>')
 
 # ---------------------------------------------------------------- 8

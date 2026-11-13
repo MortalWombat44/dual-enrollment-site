@@ -32,7 +32,22 @@ const pending = () => sql(`SELECT c.code FROM course_requests r JOIN courses c O
   check(await s.locator('[data-kind="ce"] label:has-text("MATH 13")').count() === 1 && await s.locator('button:has-text("Add a concurrent class")').count() === 1, 'concurrent: stock list plus type-in');
   await s.click('[data-kind="de"] label:has-text("ENGL C1000")');
   await s.click('[data-kind="ce"] label:has-text("MATH 13")');
+  // A concurrent class with a prerequisite: a pop-up says a transcript is needed.
+  const pop = s.locator('[data-prereq-notice]');
+  await pop.waitFor();
+  check(/MATH 13 has a prerequisite/.test(await pop.innerText()) && /your transcript/.test(await pop.innerText()) && /Prerequisite review/.test(await pop.innerText()), 'pop-up: prerequisite class needs a transcript, and where to send it');
+  await pop.locator('button:has-text("OK, I\'ll send my transcript")').click();
+  check(await pop.count() === 0 && await s.locator('input[name="course"]:checked').count() === 2, 'pop-up closes; the class stays picked');
+  await s.click('[data-kind="ce"] label:has-text("MATH 13")'); await s.click('[data-kind="ce"] label:has-text("MATH 13")');
+  await pop.waitFor(); await pop.locator('button').click(); // unpick + pick again: shown again
+  await s.click('[data-kind="de"] label:has-text("ENGL C1000")'); await s.click('[data-kind="de"] label:has-text("ENGL C1000")');
+  check(await pop.count() === 0, 'no pop-up for a class without a prerequisite');
   await addCe(s, 'HIST C1010', 3);
+  // Typed-in class: ticking "has a prerequisite" shows it too.
+  const tick = s.locator('.ce-row').last().locator('input[type="checkbox"]');
+  await tick.check(); await pop.waitFor();
+  check(/HIST C1010 has a prerequisite/.test(await pop.innerText()), 'pop-up for a typed-in class marked as having a prerequisite');
+  await pop.locator('button').click(); await tick.uncheck();
   await Promise.all([s.waitForURL(/complete/), s.click('button:has-text("Submit courses")')]);
 
   // Parallel queues.

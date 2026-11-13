@@ -78,6 +78,8 @@ export function latestAffidavit(studentId: number): Affidavit | null {
   return (db().prepare('SELECT id, file_id, uploaded_by, uploaded_at, status, reviewed_by, reviewed_at, note FROM affidavits WHERE student_id = ? ORDER BY id DESC LIMIT 1').get(studentId) as Affidavit | undefined) ?? null;
 }
 
+/** Unlisted ("Other") schools and homeschool: the student names the person who approves their classes, by link. */
+export const namesApprover = (s: { kind: string }) => s.kind === 'other' || s.kind === 'homeschool';
 export const hsApprovalMode = (designation: 'CCAP' | 'NON_CCAP'): Mode => (designation === 'CCAP' ? 'off' : 'required');
 
 export type StudentStep = {
@@ -277,9 +279,8 @@ function computeProgress(student: User, x: Loaded): StudentProgress | null {
   const modes: Record<number, Mode> = enr?.step_modes ? JSON.parse(enr.step_modes) : { ...(x.schoolModes.get(school.id) ?? {}) };
   modes[4] = hsApprovalMode(school.designation); // set by school type, never by saved settings
   modes[9] = 'required'; modes[10] = 'required'; // young student review is policy, not a school setting
-  // Homeschooled: no high school approval; the Private School Affidavit is reviewed by Shasta College instead.
+  // Homeschooled: the approver they name approves classes (like an unlisted school), and Shasta College reviews the Private School Affidavit.
   modes[11] = school.kind === 'homeschool' ? 'required' : 'off';
-  if (school.kind === 'homeschool') modes[4] = 'off';
   const prog = new Map((x.progress.get(studentId) ?? []).map((r) => [r.step_id, r]));
   // A reviewer (Clear units, Prerequisite review or High school approval) sent the courses back.
   const changeRow = [...prog.values()].find((r) => r.status === 'changes_requested') ?? null;

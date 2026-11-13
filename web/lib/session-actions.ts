@@ -5,7 +5,8 @@ import { currentClassYear, currentTerm, GRADES } from './workflow';
 import { createSession, destroySession, HOME, type Role } from './auth';
 import { resolveSchool, type SchoolChoice } from './schools';
 import { parseProfile, type ProfileInput } from './profile';
-import { notifyLeads } from './notify';
+import { adminsForStudent, notifyLeads, notifyUsers } from './notify';
+import { logEvent } from './audit';
 import { hashPassword, verifyPassword } from './password';
 import { clearFailures, lockedMinutes, MAX_RESETS_PER_HOUR, recentResets, recordFailure, resetTokenUser, useResetTokens } from './security';
 import { demoMode } from './mail';
@@ -94,16 +95,20 @@ export async function signUp(formData: FormData) {
     // A Shasta College ID already on another account is allowed here; college admins see it flagged.
     const uid = Number(db()
       .prepare(`INSERT INTO users (first_name, last_name, email, role, school_id, status, password_hash, student_number, counselor_id, grad_year, grade, grade_confirmed_year,
-        date_of_birth, phone, address_line, city, state, zip, plans_shasta, plans_year, plans_at, hs_approver_name, hs_approver_email)
-        VALUES (?,?,?,'student',?,'active',?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?)`)
+        date_of_birth, phone, address_line, city, state, zip, plans_shasta, plans_year, plans_at, hs_approver_name, hs_approver_email, hs_approver_status)
+        VALUES (?,?,?,'student',?,'active',?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(first, last, email, schoolId, hashPassword(password), num, counselor?.id ?? null, gradYear, grade, thisClass,
         pr.dob, pr.phone, pr.address, pr.city, pr.state, pr.zip, pr.plans, pr.plans ? thisClass : null, pr.plans ? new Date().toISOString() : null,
-        sc.approverName, sc.approverEmail).lastInsertRowid);
+        sc.approverName, sc.approverEmail, sc.approverEmail ? 'pending' : null).lastInsertRowid);
     db().prepare('INSERT INTO enrollments (student_id, term_id) VALUES (?,?)').run(uid, currentTerm().id);
     return uid;
   });
   if (db().prepare("SELECT 1 FROM schools WHERE id = ? AND kind = 'homeschool'").get(schoolId)) {
     await notifyLeads('homeschool', id, `New homeschooled student: ${first} ${last}. They'll upload a Private School Affidavit to review.`);
+  }
+  if (sc.approverEmail) {
+    logEvent(id, { id, name: `${first} ${last}`, role: 'Student' }, 'High school approver named (waiting for Shasta College review)', `${sc.approverName} (${sc.approverEmail})`);
+    await notifyUsers(adminsForStudent(id), 'approver', id, `${first} ${last} named ${sc.approverName} (${sc.approverEmail}) as their high school approver. Check it's the right person.`);
   }
   await createSession(id);
   redirect('/student');

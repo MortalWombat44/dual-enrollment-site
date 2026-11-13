@@ -38,8 +38,8 @@ const changeClasses = async (s, fn) => {
 
   // 3 · Prerequisite review per term.
   await changeClasses(s, async () => {
-    await addCe(s, 'HIST C1010', 3); await s.locator('.ce-row').last().locator('label').click();
-    await addCe(s, 'HIST C1010', 3, 'Summer 2027'); await s.locator('.ce-row').last().locator('label').click();
+    await addCe(s, 'HIST C1010', 3); await s.locator('.ce-row').last().locator('label').click(); await s.locator('[data-prereq-notice] button').click();
+    await addCe(s, 'HIST C1010', 3, 'Summer 2027'); await s.locator('.ce-row').last().locator('label').click(); await s.locator('[data-prereq-notice] button').click();
   });
   const j = await login(b, 'jkim@shastacollege.edu');
   await openStudent(j, '', 'Jamie Lee');

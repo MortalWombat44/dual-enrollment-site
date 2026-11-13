@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { requireAdmin, type User } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TermCourses } from '@/components/TermCourses';
-import { HOLD_LABEL, stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openIdChangeIds, openSchoolChange, openSchoolChangeIds, getProgressMany, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
+import { HOLD_LABEL, namesApprover, stepOnLabel, stepStatusLabel, classLabel, currentGrade, GRADES, isYoung, ordinal, allTerms, nextRegistration, daysSince, openIdChange, openIdChangeIds, openSchoolChange, openSchoolChangeIds, getProgressMany, sharedStudentIds, latestAffidavit, maxUnitTerms, youngRecommendation, type Term, fmt, getProgress, pad, schoolCourses, type StudentProgress } from '@/lib/workflow';
 import {
-  adminAddCourse, adminCompleteStep, adminUploadTranscript, releasePrereqHold, adminFlagPrereq, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
+  adminAddCourse, adminCompleteStep, reviewApprover, adminUploadTranscript, releasePrereqHold, adminFlagPrereq, adminSendApproverLink, nudgePrerequisite, reviewAffidavit, decideYoung, recommendYoung, adminRemoveCourse, adminReopenStep, adminSetCourseTerm, clearUnits, decidePrerequisites, approveSchoolChange, declineSchoolChange, approveIdChange, declineIdChange, reassignSchool, sendBackToStudent, setGradYear, setStudentNumber,
 } from '@/lib/admin-student-actions';
 import { AdminShell } from '@/components/AdminShell';
 import { ConfirmButton } from '@/components/ConfirmButton';
@@ -16,11 +16,12 @@ import { resolveHelp } from '@/lib/help-actions';
 import { openNudges } from '@/lib/nudge';
 import { primarySchoolIds } from '@/lib/access';
 import { studentHistory } from '@/lib/audit';
+import { approverPendingIds } from '@/lib/approver-review';
 import { TRANSCRIPT_ERRORS, transcriptsFor } from '@/lib/transcripts';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'help' | 'overdue' | 'units' | 'prereq' | 'prereqwait' | 'young' | 'homeschool' | 'school' | 'idreq' | 'ids' | 'all';
+type Tab = 'help' | 'overdue' | 'units' | 'prereq' | 'prereqwait' | 'young' | 'homeschool' | 'approver' | 'school' | 'idreq' | 'ids' | 'all';
 type SP = { page?: string; link?: string; emailed?: string; classes?: string; tab?: string; school?: string; term?: string; q?: string; student?: string; done?: string; error?: string };
 
 const PAGE_SIZE = 200;
@@ -33,6 +34,8 @@ const DONE: Record<string, string> = {
   hold_none: 'That class wasn’t on hold any more.',
   transcript: 'Transcript added. A counselor sees it on Prerequisite review.',
   moved: 'Step marked complete.',
+  approver_ok: 'Approver confirmed.',
+  approver_saved: 'Approver changed and confirmed.',
   reopened: 'Step reopened, along with every step after it.',
   course_added: 'Class added to the request.',
   affidavit_ok: 'Private School Affidavit approved.',
@@ -59,6 +62,8 @@ const ERR: Record<string, string> = {
   ncws: 'Check “Student cleared in NCWS” before approving a prerequisite.',
   info_note: 'Say what information you need in the note (the student sees it).',
   tr_file: TRANSCRIPT_ERRORS.file, tr_size: TRANSCRIPT_ERRORS.size, tr_type: TRANSCRIPT_ERRORS.type,
+  approver: 'Enter the approver’s name and a valid email.',
+  approver_review: 'Review the high school approver first (see “High school approver” on this student). College review can’t be cleared until the approver is confirmed.',
   verify: 'Check Program in SACP, Start date in RGPE and Cohort in STAL before clearing.',
   no_approver: 'This student has no high school approver email on file.',
   term_taken: 'That class is already requested for that term, so it wasn’t moved.',
@@ -98,6 +103,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
   const shared = sharedStudentIds();
   const helpOpen = openHelpStudentIds();
   const schoolChanges = openSchoolChangeIds(), idChanges = openIdChangeIds();
+  const approverWaiting = approverPendingIds();
   const groups: Record<Tab, StudentProgress[]> = {
     units: all.filter((p) => waitingOn(p, 7)),
     // Prerequisites: the counselor's queue. Classes all on hold wait on the student instead.
@@ -105,6 +111,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     prereqwait: all.filter((p) => waitingOn(p, 8) && !!p.steps.find((s) => s.id === 8)?.hold),
     young: all.filter((p) => waitingOn(p, 10)),
     homeschool: all.filter((p) => waitingOn(p, 11)),
+    approver: all.filter((p) => approverWaiting.has(p.student.id)),
     help: all.filter((p) => helpOpen.has(p.student.id)),
     overdue: all.filter((p) => !!p.steps.find((s) => s.id === 5)?.overdue),
     school: all.filter((p) => schoolChanges.has(p.student.id)),
@@ -112,7 +119,7 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
     ids: all.filter((p) => !!p.student.student_number && shared.has(p.student.student_number)),
     all: everyone,
   };
-  const tab: Tab = (['help', 'overdue', 'prereq', 'prereqwait', 'young', 'homeschool', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
+  const tab: Tab = (['help', 'overdue', 'prereq', 'prereqwait', 'young', 'homeschool', 'approver', 'school', 'idreq', 'ids', 'all'] as const).find((t) => t === sp.tab) ?? 'units';
   const q = (sp.q ?? '').trim().toLowerCase();
   // The admin's primary schools go to the top of their to-do.
   const primary = new Set(primarySchoolIds(me.id));
@@ -175,10 +182,13 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
           <button className="btn btn-secondary">Filter</button>
         </form>
       </div>
+      {sp.done === 'approver_changed' && sp.link && (
+        <div className="flash" role="status">Approver changed and confirmed. {sp.classes ? `${sp.classes} went back to waiting for the new approver. ` : ''}{sp.emailed === '1' ? 'We emailed them a link to approve the classes. ' : 'Email isn’t set up, so send the new approver this link: '}<code style={{ wordBreak: 'break-all' }}>{sp.link}</code></div>
+      )}
       {sp.done === 'approver_link' && sp.link && (
         <div className="flash" role="status">{sp.emailed === '1' ? 'Emailed the approver a new link. ' : 'Email isn’t set up, so send the approver this link: '}<code style={{ wordBreak: 'break-all' }}>{sp.link}</code></div>
       )}
-      <Flash msg={sp.done === 'approver_link' ? null : sp.done === 'hs_already'
+      <Flash msg={sp.done === 'approver_link' || sp.done === 'approver_changed' ? null : sp.done === 'hs_already'
         ? `These requests were already approved by the high school${sp.classes ? `: ${sp.classes}` : ''}. Approvals stay with each class, so High school approval can't be moved back. To change a class, remove it or move it to another term; the new request goes back to the high school.`
         : sp.done ? DONE[sp.done] : null} />
       <Flash error msg={sp.error ? ERR[sp.error] : null} />
@@ -207,6 +217,9 @@ export default async function AdminStudents({ searchParams }: { searchParams: Pr
             )}
             {(groups.homeschool.length > 0 || tab === 'homeschool') && (
               <Link className="seg-opt" href={href({ tab: 'homeschool' })} aria-current={tab === 'homeschool'}>Homeschool · {groups.homeschool.length}</Link>
+            )}
+            {(groups.approver.length > 0 || tab === 'approver') && (
+              <Link className="seg-opt" href={href({ tab: 'approver' })} aria-current={tab === 'approver'}>Approver review · {groups.approver.length}</Link>
             )}
             <Link className="seg-opt" href={href({ tab: 'school' })} aria-current={tab === 'school'}>School changes · {groups.school.length}</Link>
             <Link className="seg-opt" href={href({ tab: 'idreq' })} aria-current={tab === 'idreq'}>ID changes · {groups.idreq.length}</Link>
@@ -442,12 +455,17 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
+      {namesApprover(p.school) && <ApproverReview p={p} keep={keep} />}
+
       {counselorFirst && prereqBlock}
       {s7?.status === 'in_review' && (
         <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
           <Hidden p={p} keep={keep} />
           <input type="hidden" name="stepId" value={7} />
           <div className="kicker accent700">College review &amp; clear units</div>
+          {namesApprover(p.school) && p.student.hs_approver_status !== 'approved' && (
+            <div style={{ fontSize: 13, background: '#fff4e0', color: '#6b3a00', padding: '6px 10px' }}>Review the high school approver above first. College review can&apos;t be cleared until the approver is confirmed.</div>
+          )}
           <TermCourses courses={p.courses} terms={p.requestTerms} designation={p.school.designation} compact />
           {p.school.designation === 'CCAP' && (
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
@@ -546,14 +564,6 @@ function Panel({ p, me, schools, terms, keep, sharedWith }: { p: StudentProgress
         </form>
       )}
 
-      {p.school.kind === 'other' && p.steps.find((x) => x.id === 4)?.status === 'in_review' && (
-        <form className="pad-sm" style={{ ...section, background: 'var(--color-accent-100)' }}>
-          <Hidden p={p} keep={keep} />
-          <div className="kicker accent700">High school approval · unlisted school</div>
-          <div style={{ fontSize: 14 }}>{p.school.name} isn&apos;t on the school list. {p.student.hs_approver_name} ({p.student.hs_approver_email ?? 'no email'}) approves by link.</div>
-          <button formAction={adminSendApproverLink} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Send a new approval link</button>
-        </form>
-      )}
       <ArchivedRequests studentId={p.student.id} style={{ ...section, background: '#fdf6ec' }} />
 
       <div className="pad-sm" style={section}>
@@ -715,5 +725,58 @@ function History({ studentId }: { studentId: number }) {
         </details>
       ))}
     </div>
+  );
+}
+
+/**
+ * Unlisted schools and homeschool: the person the student named to approve their classes. A college admin confirms
+ * them or corrects who it is (it has to be the school administrator, not office staff).
+ */
+function ApproverReview({ p, keep }: { p: StudentProgress; keep: Record<string, string> }) {
+  const st = p.student;
+  const pending = !!st.hs_approver_email && st.hs_approver_status !== 'approved';
+  const by = st.hs_approver_reviewed_by ? (db().prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(st.hs_approver_reviewed_by) as { first_name: string; last_name: string } | undefined) : undefined;
+  const waitingOnThem = p.steps.find((x) => x.id === 4)?.status === 'in_review';
+  const fields = (
+    <>
+      <div className="stack-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div className="field"><label htmlFor="ap_name">Approver name</label><input id="ap_name" name="approver_name" className="input" required maxLength={120} defaultValue={st.hs_approver_name ?? ''} /></div>
+        <div className="field"><label htmlFor="ap_email">Approver email</label><input id="ap_email" name="approver_email" type="email" className="input" required maxLength={200} defaultValue={st.hs_approver_email ?? ''} /></div>
+      </div>
+    </>
+  );
+  return (
+    <form key={`${st.id}-${st.hs_approver_email}-${st.hs_approver_status}`} className="pad-sm" data-approver-review={pending ? 'pending' : st.hs_approver_email ? 'approved' : 'none'} style={{ ...section, background: pending ? 'var(--color-accent-100)' : undefined }}>
+      <Hidden p={p} keep={keep} />
+      <div className={pending ? 'kicker accent700' : 'kicker'}>High school approver · {p.school.kind === 'homeschool' ? 'homeschool' : 'unlisted school'}</div>
+      {!st.hs_approver_email ? (
+        <>
+          <div style={{ fontSize: 14 }}>{st.first_name} hasn&apos;t named an approver yet. They&apos;re asked to on High school approval; you can also enter one here.</div>
+          {fields}
+          <button formAction={reviewApprover} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Save and confirm approver</button>
+        </>
+      ) : pending ? (
+        <>
+          <div style={{ fontSize: 14 }}>
+            {st.first_name} named this person to approve their classes{p.school.kind === 'homeschool' ? ' (the administrator of their home school)' : ` at ${p.school.name}`}. Check that it&apos;s the school <strong>administrator</strong>, not office staff. Confirm them, or change the name and email first.
+          </div>
+          {fields}
+          <button formAction={reviewApprover} className="btn btn-primary" style={{ justifyContent: 'space-between', padding: '12px 16px', fontSize: 15 }}>Confirm approver <span>→</span></button>
+          <div className="ink60" style={{ fontSize: 12 }}>If you change the email, the new person gets the approval link, the old link stops working, and anything the old person approved goes back to waiting.</div>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 14 }}><strong>{st.hs_approver_name}</strong> ({st.hs_approver_email}) · confirmed{by ? ` by ${by.first_name} ${by.last_name}` : ''}{st.hs_approver_reviewed_at ? ` on ${fmt(st.hs_approver_reviewed_at)}` : ''}. They approve by link.</div>
+          <details>
+            <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-accent-700)' }}>Change approver</summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              {fields}
+              <button formAction={reviewApprover} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Save approver</button>
+            </div>
+          </details>
+        </>
+      )}
+      {st.hs_approver_email && waitingOnThem && <button formAction={adminSendApproverLink} formNoValidate className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>Send a new approval link</button>}
+    </form>
   );
 }

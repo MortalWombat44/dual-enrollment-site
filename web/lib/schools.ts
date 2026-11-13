@@ -19,7 +19,11 @@ export function resolveSchool(formData: FormData): SchoolChoice | { error: strin
   const d = db();
   if (v === 'homeschool') {
     const h = d.prepare("SELECT id FROM schools WHERE kind = 'homeschool'").get() as { id: number };
-    return { schoolId: h.id, approverName: null, approverEmail: null };
+    // Homeschooled students name the administrator of their home school, who approves their classes.
+    const approverName = String(formData.get('approver_name') || '').trim().slice(0, 120);
+    const approverEmail = String(formData.get('approver_email') || '').trim().toLowerCase().slice(0, 200);
+    if (!approverName || !EMAIL.test(approverEmail)) return { error: 'approver' };
+    return { schoolId: h.id, approverName, approverEmail };
   }
   if (v === 'other') {
     const name = String(formData.get('other_school') || '').trim().replace(/\s+/g, ' ').slice(0, 120);
@@ -42,5 +46,5 @@ export function resolveSchool(formData: FormData): SchoolChoice | { error: strin
 export const SCHOOL_ERRORS: Record<string, string> = {
   school: 'Pick your high school.',
   other_school: "Type your high school's name.",
-  approver: 'Enter the name and email of the person at your high school who approves dual enrollment classes.',
+  approver: 'Enter the name and email of the school administrator who approves your dual enrollment classes.',
 };

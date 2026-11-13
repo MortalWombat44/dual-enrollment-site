@@ -9,7 +9,8 @@ import { actorOf, logEvent } from './audit';
 import { addTranscript, readUpload, releaseHolds } from './transcripts';
 import { mailConfigured, sendMail } from './mail';
 import { siteOrigin } from './site';
-import { HOLD_LABEL, courseName, type PrereqHold } from './workflow';
+import { HOLD_LABEL, courseName, namesApprover, type PrereqHold } from './workflow';
+import { setApprover, validApprover } from './approver-review';
 import { addRequest, ceCourse, currentClassYear, parseCe, youngRecommendation, type YoungRec, GRADES, completeStep, getProgress, moveStudentSchool, reopenFrom, requestChanges, STUDENT_STEP_IDS } from './workflow';
 
 /** Where to send the admin back to, keeping their place in the queue. */
@@ -42,6 +43,8 @@ export async function clearUnits(formData: FormData) {
   if (!['v_sacp', 'v_rgpe', 'v_stal'].every((k) => formData.get(k) === 'on')) redirect(back(formData, { error: 'verify' }));
   const num = String(formData.get('student_number') || '').trim().slice(0, 20);
   if (!/^[A-Za-z0-9-]{4,20}$/.test(num)) redirect(back(formData, { error: 'id' }));
+  // Unlisted schools and homeschool: the named approver has to be reviewed before College review is cleared.
+  if (namesApprover(p.school) && p.student.hs_approver_status !== 'approved') redirect(back(formData, { error: 'approver_review' }));
   const oldNum = p.student.student_number;
   if (num !== oldNum) db().prepare('UPDATE users SET student_number = ? WHERE id = ?').run(num, studentId);
   // school_id records which school the student was at, for the Reports page.
@@ -311,8 +314,9 @@ async function decideSchoolChange(formData: FormData, approve: boolean) {
   if (approve) {
     const cur = db().prepare('SELECT school_id FROM users WHERE id = ?').get(studentId) as { school_id: number | null } | undefined;
     if (req!.to_school_id !== cur?.school_id) moveStudentSchool(studentId, req!.to_school_id);
-    // An unlisted ("Other") school comes with the approver the student named.
-    db().prepare('UPDATE users SET hs_approver_name = ?, hs_approver_email = ? WHERE id = ?').run(req!.approver_name, req!.approver_email, studentId);
+    // An unlisted ("Other") school or homeschool comes with the approver the student named, to be reviewed.
+    db().prepare('UPDATE users SET hs_approver_name = ?, hs_approver_email = ?, hs_approver_status = ?, hs_approver_reviewed_by = NULL, hs_approver_reviewed_at = NULL WHERE id = ?')
+      .run(req!.approver_name, req!.approver_email, req!.approver_email ? 'pending' : null, studentId);
   }
   db().prepare('UPDATE school_change_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?').run(approve ? 'approved' : 'declined', me.id, new Date().toISOString(), req.id);
   logEvent(studentId, actorOf(me), approve ? 'High school change approved' : 'High school change declined', (db().prepare('SELECT name FROM schools WHERE id = ?').get(req!.to_school_id) as { name: string } | undefined)?.name ?? null);
@@ -423,4 +427,24 @@ export async function adminFlagPrereq(formData: FormData) {
     WHERE student_id = ? AND course_id = ? AND term_id IS ?`).run(on ? 1 : 0, on ? me.id : null, on ? 1 : 0, on ? 1 : 0, on ? 1 : 0, studentId, courseId, termId);
   logEvent(studentId, actorOf(me), on ? `Sent ${courseName(courseId)} to prerequisite review` : `Took ${courseName(courseId)} out of prerequisite review`, null, [termId]);
   redirect(back(formData, { done: on ? 'prereq_flagged' : 'prereq_unflagged' }));
+}
+
+/**
+ * Review the approver a student named (unlisted schools and homeschool): confirm them, or correct the name / email
+ * (e.g. the student named office staff and it has to be the administrator). A changed approver gets a new link.
+ */
+export async function reviewApprover(formData: FormData) {
+  const { me, studentId, p } = await load(formData);
+  if (!namesApprover(p.school)) redirect(back(formData));
+  const name = String(formData.get('approver_name') || '').trim().slice(0, 120);
+  const email = String(formData.get('approver_email') || '').trim().toLowerCase().slice(0, 200);
+  if (!validApprover(name, email)) redirect(back(formData, { error: 'approver' }));
+  const emailChanged = (p.student.hs_approver_email ?? '').toLowerCase() !== email;
+  const r = await setApprover(studentId, name, email, actorOf(me), me.id);
+  // The new person gets a link when classes are waiting on them.
+  if (emailChanged && getProgress(studentId)?.steps.find((s) => s.id === 4)?.status === 'in_review') {
+    const sent = await sendApproverLink(studentId);
+    if (sent) redirect(back(formData, { done: 'approver_changed', link: sent.link, emailed: sent.emailed ? '1' : '0', classes: r.reset.join(', ') }));
+  }
+  redirect(back(formData, { done: r.changed ? 'approver_saved' : 'approver_ok' }));
 }

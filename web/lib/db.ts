@@ -756,6 +756,16 @@ function migrate(d: DatabaseSync) {
   // Schools students typed in ("Other") and the one Homeschool entry aren't on the sign-up list.
   const schoolCols = (d.prepare('PRAGMA table_info(schools)').all() as { name: string }[]).map((c) => c.name);
   if (!schoolCols.includes('kind')) d.exec("ALTER TABLE schools ADD COLUMN kind TEXT NOT NULL DEFAULT 'listed' CHECK (kind IN ('listed','other','homeschool'))");
+  // The named high school approver ("Other" schools and homeschool) is reviewed by a college admin.
+  if (!cols.includes('hs_approver_status')) {
+    d.exec("ALTER TABLE users ADD COLUMN hs_approver_status TEXT CHECK (hs_approver_status IN ('pending','approved'))");
+    d.exec('ALTER TABLE users ADD COLUMN hs_approver_reviewed_by INTEGER');
+    d.exec('ALTER TABLE users ADD COLUMN hs_approver_reviewed_at TEXT');
+    d.exec("UPDATE users SET hs_approver_status = 'pending' WHERE hs_approver_email IS NOT NULL");
+    // Homeschooled students now name an approver too. Classes they requested before this count as approved.
+    d.prepare(`UPDATE course_requests SET hs_status = 'approved', hs_at = ?, hs_sign_method = 'grandfathered'
+      WHERE hs_status = 'pending' AND student_id IN (SELECT u.id FROM users u JOIN schools s ON s.id = u.school_id WHERE s.kind = 'homeschool')`).run(new Date().toISOString());
+  }
   const termCols = (d.prepare('PRAGMA table_info(terms)').all() as { name: string }[]).map((c) => c.name);
   if (!termCols.includes('summer')) {
     d.exec('ALTER TABLE terms ADD COLUMN summer INTEGER NOT NULL DEFAULT 0');

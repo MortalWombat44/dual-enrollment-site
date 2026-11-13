@@ -25,7 +25,7 @@ const open = async (p, tab, email) => { await p.goto(B + `/admin/students?tab=${
   await jm.goto(B + '/student/steps/1'); await Promise.all([jm.waitForURL(/complete/), jm.click('button:has-text("Save my ID")')]);
   grantConsent(J);
   await jm.goto(B + '/student/steps/2'); await jm.waitForLoadState('networkidle');
-  await addCe(jm, 'HIST C1010', 3); await jm.locator('.ce-row').last().locator('label').click();
+  await addCe(jm, 'HIST C1010', 3); await jm.locator('.ce-row').last().locator('label').click(); await jm.locator('[data-prereq-notice] button').click();
   await Promise.all([jm.waitForURL(/complete/), jm.click('button:has-text("Submit courses")')]);
   const jordan = await login(b, 'jkim@shastacollege.edu');
   for (const e of [J, E]) { await open(jordan, 'units', e); await Promise.all([jordan.waitForURL(/done=cleared/), clearUnits(jordan)]); }

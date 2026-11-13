@@ -29,8 +29,9 @@ export async function submitConsent(formData: FormData) {
   const buf = Buffer.from(m![1], 'base64');
   if (buf.length > 2 * 1024 * 1024 || sniff(buf) !== 'image/png') back('signature');
   const fileId = saveFile({ studentId, uploadedBy: me.id, kind: 'signature', filename: 'signature.png', mime: 'image/png', data: buf });
-  completeStep(studentId, 3, { method, signer, parent_id: me.id, file_id: fileId }, true);
-  logEvent(studentId, actorOf(me), 'Parent consent signed', `Signed by ${signer} (digital signature)`);
+  const signMethod = formData.get('sign_mode') === 'type' ? 'typed' : 'drawn';
+  completeStep(studentId, 3, { method, signer, parent_id: me.id, file_id: fileId, sign_method: signMethod }, true);
+  logEvent(studentId, actorOf(me), 'Parent consent signed', `Signed by ${signer} (digital signature, ${signMethod})`);
   redirect(`/parent?signed=${studentId}`);
 }
 

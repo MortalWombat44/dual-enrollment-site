@@ -1,11 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useFormStatus } from 'react-dom';
 import { SignaturePad } from './SignaturePad';
+import { CURSIVE, typedToPng } from './typed-signature';
 
 
-/** Parent consent: digital signature only (uploading a signed form is turned off). */
+/** Parent consent: digital signature only, drawn or typed (shown in a cursive script). Uploading a signed form is turned off. */
 export function ConsentForm({
   action, studentId, studentFirst, parentName, error,
 }: {
@@ -15,25 +16,47 @@ export function ConsentForm({
   parentName: string;
   error?: string;
 }) {
-  const [sig, setSig] = useState('');
+  const [mode, setMode] = useState<'draw' | 'type'>('draw');
+  const [drawn, setDrawn] = useState('');
+  const [name, setName] = useState(parentName);
+  const [typedPng, setTypedPng] = useState('');
   const [agree, setAgree] = useState(false);
-  const ready = agree && !!sig;
+  // Typing: the signature is the full name above, in cursive.
+  useEffect(() => {
+    if (mode !== 'type' || !name.trim()) { setTypedPng(''); return; }
+    let live = true;
+    typedToPng(name.trim()).then((png) => live && setTypedPng(png));
+    return () => { live = false; };
+  }, [mode, name]);
+  const sig = mode === 'draw' ? drawn : typedPng;
+  const ready = agree && !!sig && !!name.trim();
 
   return (
     <form action={action} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <input type="hidden" name="studentId" value={studentId} />
       <input type="hidden" name="method" value="esign" />
       <input type="hidden" name="signature" value={sig} />
+      <input type="hidden" name="sign_mode" value={mode} />
       {error && <div className="flash flash-err" style={{ padding: '12px 16px' }}>{error}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div className="field" style={{ maxWidth: 420 }}>
           <label htmlFor="signer">Your full name</label>
-          <input id="signer" name="signer" className="input" required defaultValue={parentName} autoComplete="name" />
+          <input id="signer" name="signer" className="input" required value={name} onChange={(e) => setName(e.target.value)} maxLength={120} autoComplete="name" />
         </div>
         <div className="field">
           <label>Signature</label>
-          <SignaturePad onChange={setSig} />
+          <div className="seg seg-ink" role="radiogroup" aria-label="How to sign" style={{ alignSelf: 'flex-start', marginBottom: 8 }}>
+            <label className="seg-opt"><input type="radio" checked={mode === 'draw'} onChange={() => setMode('draw')} />Draw</label>
+            <label className="seg-opt"><input type="radio" checked={mode === 'type'} onChange={() => setMode('type')} />Type</label>
+          </div>
+          {mode === 'draw' && <SignaturePad onChange={setDrawn} />}
+          {mode === 'type' && (
+            <>
+              <div data-typed-signature aria-label={`Signature: ${name}`} style={{ border: '2px solid var(--color-text)', background: '#fff', padding: '6px 16px', fontFamily: CURSIVE, fontSize: 44, lineHeight: 1.3, minHeight: 70, overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 640 }}>{name}</div>
+              <div className="ink60" style={{ fontSize: 13, marginTop: 6 }}>Your full name above, shown as your signature. Change the name to change it.</div>
+            </>
+          )}
         </div>
       </div>
 

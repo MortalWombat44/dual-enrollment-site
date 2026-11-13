@@ -13,7 +13,8 @@ import { parseProfile, type ProfileInput } from './profile';
 import { MAX_UPLOAD_BYTES } from './constants';
 import { actorOf, logEvent } from './audit';
 import { addTranscript, readUpload, releaseHolds } from './transcripts';
-import { courseName } from './workflow';
+import { courseName, namesApprover } from './workflow';
+import { setApprover, validApprover } from './approver-review';
 import { notifyUsers } from './notify';
 import { sendInvite } from './account-mail';
 
@@ -57,7 +58,7 @@ export async function addStudentId(formData: FormData) {
 async function emailApproverIfNeeded(studentId: number) {
   const p = getProgress(studentId);
   // Without email set up, the student sends the link themselves (a new link would cancel one they already shared).
-  if (mailConfigured() && p?.school.kind === 'other' && p.steps.find((s) => s.id === 4)?.status === 'in_review') await sendApproverLink(studentId);
+  if (mailConfigured() && p && namesApprover(p.school) && p.steps.find((s) => s.id === 4)?.status === 'in_review') await sendApproverLink(studentId);
 }
 
 /** Reads the course picker: Dual Enrollment checkboxes (each with a term) and typed-in Concurrent classes. */
@@ -297,8 +298,10 @@ export async function saveHsApprover(formData: FormData) {
   const me = await requireRole('student');
   const name = String(formData.get('approver_name') || '').trim().slice(0, 120);
   const email = String(formData.get('approver_email') || '').trim().toLowerCase().slice(0, 200);
-  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) redirect('/student/account?error=approver');
-  db().prepare('UPDATE users SET hs_approver_name = ?, hs_approver_email = ? WHERE id = ?').run(name, email, me.id);
+  if (!validApprover(name, email)) redirect('/student/account?error=approver');
+  // A changed approver is reviewed by Shasta College again; a new link goes to them when classes are waiting.
+  const r = await setApprover(me.id, name, email, actorOf(me), null);
+  if (r.changed) await emailApproverIfNeeded(me.id);
   redirect('/student/account?saved=approver');
 }
 
